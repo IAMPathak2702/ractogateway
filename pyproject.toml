@@ -36,6 +36,19 @@ keywords = [
     "gateway",
     "unified-api",
     "developer-kit",
+    "rag",
+    "retrieval-augmented-generation",
+    "vector-database",
+    "chromadb",
+    "faiss",
+    "pinecone",
+    "qdrant",
+    "weaviate",
+    "milvus",
+    "pgvector",
+    "voyage-ai",
+    "chunking",
+    "document-parsing",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -63,6 +76,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# ── LLM providers ────────────────────────────────────────────────────────────
 openai = ["openai>=1.0,<3.0"]
 google = ["google-genai>=1.0,<2.0"]
 anthropic = ["anthropic>=0.40,<1.0"]
@@ -71,8 +85,54 @@ all = [
     "ractogateway[google]",
     "ractogateway[anthropic]",
 ]
+
+# ── RAG file readers (each optional) ─────────────────────────────────────────
+rag-pdf     = ["pypdf>=4.0,<6.0"]
+rag-word    = ["python-docx>=1.1,<2.0"]
+rag-excel   = ["openpyxl>=3.1,<4.0"]
+rag-image   = ["pillow>=10.0,<12.0"]
+rag-nlp     = ["nltk>=3.8,<4.0"]
+rag-readers = [
+    "ractogateway[rag-pdf]",
+    "ractogateway[rag-word]",
+    "ractogateway[rag-excel]",
+    "ractogateway[rag-image]",
+]
+
+# ── RAG vector stores (each optional) ────────────────────────────────────────
+rag-chroma   = ["chromadb>=0.5,<2.0"]
+rag-faiss    = ["faiss-cpu>=1.7,<2.0", "numpy>=1.24,<3.0"]
+rag-pinecone = ["pinecone-client>=3.0,<5.0"]
+rag-qdrant   = ["qdrant-client>=1.9,<2.0"]
+rag-weaviate = ["weaviate-client>=4.6,<5.0"]
+rag-milvus   = ["pymilvus>=2.4,<3.0"]
+rag-pgvector = ["psycopg2-binary>=2.9,<3.0", "pgvector>=0.3,<1.0"]
+
+# ── RAG embedding providers ───────────────────────────────────────────────────
+rag-voyage = ["voyageai>=0.2,<2.0"]
+
+# ── Convenience bundles ───────────────────────────────────────────────────────
+# Minimal RAG (in-memory store, text+pdf+html readers, clean+lemmatize)
+rag = [
+    "ractogateway[rag-readers]",
+    "ractogateway[rag-nlp]",
+]
+# Everything RAG
+rag-all = [
+    "ractogateway[rag]",
+    "ractogateway[rag-chroma]",
+    "ractogateway[rag-faiss]",
+    "ractogateway[rag-pinecone]",
+    "ractogateway[rag-qdrant]",
+    "ractogateway[rag-weaviate]",
+    "ractogateway[rag-milvus]",
+    "ractogateway[rag-pgvector]",
+    "ractogateway[rag-voyage]",
+]
+
 dev = [
     "ractogateway[all]",
+    "ractogateway[rag]",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
@@ -144,6 +204,9 @@ known-first-party = ["ractogateway"]
 "src/ractogateway/prompts/engine.py" = ["E501"]               # guardrail strings intentionally verbose
 "src/ractogateway/tools/registry.py" = ["PLR2004"]            # magic length constant is self-documenting
 "src/ractogateway/anthropic_developer_kit/kit.py" = ["PLR0911"] # streaming state machine needs >6 return paths
+"src/ractogateway/rag/stores/faiss_store.py" = ["S301", "S403"] # pickle used for local persistence
+"src/ractogateway/rag/stores/pgvector_store.py" = ["S608"]    # SQL string formatting is parameterised
+"src/ractogateway/rag/chunkers/recursive_chunker.py" = ["PLR0912"] # chunking algorithm needs branching
 
 [tool.mypy]
 python_version = "3.10"
@@ -162,6 +225,22 @@ module = [
     "openai.*",
     "google.*",
     "anthropic.*",
+    # RAG optional deps
+    "pypdf.*",
+    "docx.*",
+    "openpyxl.*",
+    "PIL.*",
+    "nltk.*",
+    "chromadb.*",
+    "faiss.*",
+    "pinecone.*",
+    "qdrant_client.*",
+    "weaviate.*",
+    "pymilvus.*",
+    "psycopg2.*",
+    "pgvector.*",
+    "voyageai.*",
+    "numpy.*",
 ]
 ignore_missing_imports = true
 

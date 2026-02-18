@@ -1,8 +1,17 @@
 # RactoGateway
 
-**One Python package for all production-grade LLM solutions.**
+**One Python package for production-grade LLM workflows.**
 
-RactoGateway is a unified AI SDK that gives you a single, clean interface to OpenAI, Google Gemini, and Anthropic Claude — with built-in anti-hallucination prompting, strict Pydantic validation, streaming, tool calling, and embeddings. No more messy JSON dicts. No more provider lock-in. No more inconsistent response formats.
+RactoGateway gives you one clean SDK for:
+- OpenAI
+- Google Gemini
+- Anthropic Claude
+- Tool calling
+- Structured outputs
+- Streaming
+- Embeddings
+- RAG
+- Fine-tuning datasets and tuners
 
 [![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-blue.svg)](https://pypi.org/project/ractogateway/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
@@ -11,197 +20,302 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 
 ---
 
-## Why RactoGateway?
+## Why RactoGateway? (Teaching Note)
 
-Every LLM provider has a different SDK, different request format, different response structure, and different tool-calling schema. Building production AI applications means writing glue code, parsing deeply nested objects, and manually stripping markdown fences from JSON responses.
+### Input (without RactoGateway)
+```python
+# Pseudo-typical code without a unified SDK:
+# - Provider-specific request shapes
+# - Provider-specific response parsing
+# - Manual JSON-fence cleanup
+# - Manual tool schema translation
 
-RactoGateway solves this by providing:
+raw_text = """```json
+{"answer":"42"}
+```"""
+clean = raw_text.replace("```json", "").replace("```", "").strip()
+parsed = __import__("json").loads(clean)
+print(parsed["answer"])
+```
 
-- **RACTO Prompt Engine** — a structured prompt framework (Role, Aim, Constraints, Tone, Output) that compiles into optimized, anti-hallucination system prompts
-- **Three Developer Kits** — `opd` (OpenAI), `god` (Google), `anth` (Anthropic) — each with `chat()`, `achat()`, `stream()`, `astream()`, `embed()`, and `aembed()`
-- **Strict Pydantic models** for every input and output — no raw dicts anywhere
-- **Automatic JSON parsing** — responses are cleaned of markdown fences and auto-parsed
-- **Unified tool calling** — define tools once as Python functions, use them with any provider
-- **Streaming with typed chunks** — every `StreamChunk` has `.delta.text`, `.accumulated_text`, `.is_final`, `.usage`
+### Output
+```text
+42
+```
+
+### Input (with RactoGateway)
+```python
+from ractogateway import RactoPrompt
+from ractogateway.adapters.base import try_parse_json, strip_markdown_fences
+
+prompt = RactoPrompt(
+    role="You are a precise assistant.",
+    aim="Return the answer.",
+    constraints=["Return only what is asked."],
+    tone="Concise",
+    output_format="json",
+)
+
+raw_text = """```json
+{"answer":"42"}
+```"""
+print(strip_markdown_fences(raw_text))
+print(try_parse_json(raw_text))
+```
+
+### Output
+```text
+{"answer":"42"}
+{'answer': '42'}
+```
 
 ---
 
 ## Installation
 
+### Input
 ```bash
-# Core package (includes RACTO prompt engine and tool registry)
+# Core package
 pip install ractogateway
 
-# With a specific provider
+# Provider extras
 pip install ractogateway[openai]
 pip install ractogateway[google]
 pip install ractogateway[anthropic]
 
 # All providers
 pip install ractogateway[all]
-
-# Development (all providers + testing + linting)
-pip install ractogateway[dev]
 ```
 
-**Requirements:** Python 3.10+, Pydantic 2.0+
+### Output
+```text
+Successfully installed ractogateway-0.1.0
+```
+
+### Input (RAG extras)
+```bash
+# Minimal RAG stack
+pip install ractogateway[rag]
+
+# Full RAG stack (all vector stores + readers + voyage)
+pip install ractogateway[rag-all]
+```
+
+### Output
+```text
+Successfully installed ractogateway-0.1.0 ... (RAG optional dependencies)
+```
+
+### Input (dev setup)
+```bash
+pip install -e ".[dev]"
+```
+
+### Output
+```text
+Successfully installed ractogateway-0.1.0 pytest ruff mypy ...
+```
+
+Requirements:
+- Python `>=3.10`
+- Pydantic `>=2.0,<3.0`
 
 ---
 
 ## Quick Start
 
-### 1. Define a RACTO Prompt
+### 1) Create a RACTO prompt
 
-Every prompt is a validated Pydantic model with five required fields:
-
+### Input
 ```python
 from ractogateway import RactoPrompt
 
 prompt = RactoPrompt(
-    role="You are a senior Python code reviewer at a Fortune 500 company.",
-    aim="Review the given code for bugs, security vulnerabilities, and PEP-8 violations.",
+    role="You are a senior Python reviewer.",
+    aim="Find bugs and return JSON.",
     constraints=[
-        "Only report issues you are certain about.",
-        "Do not suggest stylistic preferences.",
-        "If no issues are found, say so explicitly.",
-        "Never fabricate code examples that you cannot verify.",
+        "Do not guess.",
+        "If no bug exists, return an empty issues list.",
     ],
-    tone="Professional and concise",
+    tone="Professional",
     output_format="json",
 )
+
+print(prompt.compile().splitlines()[:8])
 ```
 
-### 2. Use a Developer Kit
+### Output
+```text
+['[ROLE]', 'You are a senior Python reviewer.', '', '[AIM]', 'Find bugs and return JSON.', '', '[CONSTRAINTS]', '- Do not guess.']
+```
 
+### 2) Use a developer kit (OpenAI example)
+
+### Input
 ```python
 from ractogateway import openai_developer_kit as opd
 
 kit = opd.OpenAIDeveloperKit(
     model="gpt-4o",
-    api_key="sk-...",          # or set OPENAI_API_KEY env var
+    api_key="sk-...",      # or OPENAI_API_KEY
     default_prompt=prompt,
 )
 
-# Synchronous chat
-response = kit.chat(opd.ChatConfig(user_message="Review this function:\ndef add(a, b): return a + b"))
-print(response.content)        # cleaned text
-print(response.parsed)         # auto-parsed JSON dict (if response was JSON)
-print(response.usage)          # {"prompt_tokens": 42, "completion_tokens": 18, "total_tokens": 60}
+cfg = opd.ChatConfig(user_message="Review: def add(a,b): return a+b")
+resp = kit.chat(cfg)
+
+print(resp.content)
+print(resp.parsed)
+print(resp.finish_reason)
+print(resp.usage)
 ```
 
-### 3. Stream Responses
+### Output (example)
+```text
+{"issues":[],"risk":"low","summary":"No bug found in provided snippet."}
+{'issues': [], 'risk': 'low', 'summary': 'No bug found in provided snippet.'}
+FinishReason.STOP
+{'prompt_tokens': 112, 'completion_tokens': 23, 'total_tokens': 135}
+```
 
+### 3) Stream response chunks
+
+### Input
 ```python
-for chunk in kit.stream(opd.ChatConfig(user_message="Explain Python generators")):
+for chunk in kit.stream(opd.ChatConfig(user_message="Explain Python generators in 3 bullets.")):
     print(chunk.delta.text, end="", flush=True)
     if chunk.is_final:
-        print(f"\n\nTokens used: {chunk.usage}")
+        print("\nFINAL:", chunk.finish_reason, chunk.usage)
 ```
 
-### 4. Async Support
+### Output (example)
+```text
+1) A generator yields values lazily.
+2) It preserves state between yields.
+3) It saves memory for large sequences.
+FINAL: FinishReason.STOP {'prompt_tokens': 98, 'completion_tokens': 36, 'total_tokens': 134}
+```
 
+### 4) Async usage
+
+### Input
 ```python
 import asyncio
 
 async def main():
-    response = await kit.achat(opd.ChatConfig(user_message="What is SOLID?"))
-    print(response.content)
+    r = await kit.achat(opd.ChatConfig(user_message="What is SOLID in one sentence?"))
+    print("achat:", r.content)
 
-    async for chunk in kit.astream(opd.ChatConfig(user_message="Explain SOLID")):
-        print(chunk.delta.text, end="", flush=True)
+    async for c in kit.astream(opd.ChatConfig(user_message="Give SOLID as bullets.")):
+        print(c.delta.text, end="")
+    print()
 
 asyncio.run(main())
+```
+
+### Output (example)
+```text
+achat: SOLID is a set of five design principles for maintainable OO software.
+- S: Single Responsibility
+- O: Open/Closed
+- L: Liskov Substitution
+- I: Interface Segregation
+- D: Dependency Inversion
 ```
 
 ---
 
 ## Developer Kits
 
-RactoGateway provides three developer kits — one per provider. Each is a self-contained module with the kit class, all input models, and all output models.
+RactoGateway ships 3 kit modules with a consistent surface:
+- `opd` -> OpenAI
+- `god` -> Google Gemini
+- `anth` -> Anthropic Claude
 
+### Input
 ```python
-from ractogateway import openai_developer_kit as opd       # OpenAI / Azure OpenAI
-from ractogateway import google_developer_kit as god        # Google Gemini
-from ractogateway import anthropic_developer_kit as anth    # Anthropic Claude
+from ractogateway import openai_developer_kit as opd
+from ractogateway import google_developer_kit as god
+from ractogateway import anthropic_developer_kit as anth
+
+print(opd.OpenAIDeveloperKit.provider)
+print(god.GoogleDeveloperKit.provider)
+print(anth.AnthropicDeveloperKit.provider)
 ```
 
-### Method Reference
+### Output
+```text
+openai
+google
+anthropic
+```
 
-| Method | `opd` | `god` | `anth` | Description |
-| --- | :---: | :---: | :---: | --- |
-| `chat(config)` | Yes | Yes | Yes | Synchronous chat completion |
-| `achat(config)` | Yes | Yes | Yes | Async chat completion |
-| `stream(config)` | Yes | Yes | Yes | Sync streaming (yields `StreamChunk`) |
-| `astream(config)` | Yes | Yes | Yes | Async streaming (yields `StreamChunk`) |
-| `embed(config)` | Yes | Yes | -- | Sync embeddings |
-| `aembed(config)` | Yes | Yes | -- | Async embeddings |
+### Method support matrix
 
-> Anthropic does not offer a native embedding API. Use the OpenAI or Google kit for embeddings.
+| Method | OpenAI (`opd`) | Google (`god`) | Anthropic (`anth`) |
+| --- | :---: | :---: | :---: |
+| `chat(config)` | Yes | Yes | Yes |
+| `achat(config)` | Yes | Yes | Yes |
+| `stream(config)` | Yes | Yes | Yes |
+| `astream(config)` | Yes | Yes | Yes |
+| `embed(config)` | Yes | Yes | No |
+| `aembed(config)` | Yes | Yes | No |
 
-### Kit Constructors
-
+### Input (embedding with OpenAI)
 ```python
-# OpenAI
-kit = opd.OpenAIDeveloperKit(
-    model="gpt-4o",                            # required
-    api_key="sk-...",                          # or OPENAI_API_KEY env var
-    base_url="https://custom-proxy.com/v1",    # optional (Azure, proxies)
-    embedding_model="text-embedding-3-small",  # default
-    default_prompt=prompt,                     # optional
-)
+ecfg = opd.EmbeddingConfig(texts=["hello", "world"])
+eresp = kit.embed(ecfg)
+print(eresp.model)
+print(len(eresp.vectors), len(eresp.vectors[0].embedding))
+```
 
-# Google Gemini
-kit = god.GoogleDeveloperKit(
-    model="gemini-2.0-flash",                  # required
-    api_key="AIza...",                         # or GEMINI_API_KEY env var
-    embedding_model="text-embedding-004",      # default
-    default_prompt=prompt,                     # optional
-)
-
-# Anthropic Claude
-kit = anth.AnthropicDeveloperKit(
-    model="claude-sonnet-4-5-20250929",        # required
-    api_key="sk-ant-...",                      # or ANTHROPIC_API_KEY env var
-    default_prompt=prompt,                     # optional
-)
+### Output (example)
+```text
+text-embedding-3-small
+2 1536
 ```
 
 ---
 
 ## Input Models
 
-All inputs are strictly validated Pydantic models. No raw dicts. No positional argument sprawl.
+All call inputs are Pydantic models.
 
 ### `ChatConfig`
 
-The single input for `chat()`, `achat()`, `stream()`, and `astream()`.
-
+### Input
 ```python
-config = opd.ChatConfig(
-    user_message="Explain monads in simple terms.",   # required, min 1 char
-    prompt=prompt,                                     # optional (falls back to kit default)
-    temperature=0.3,                                   # 0.0–2.0, default 0.0
-    max_tokens=2048,                                   # default 4096
-    tools=my_tool_registry,                            # optional ToolRegistry
-    response_model=MyPydanticModel,                    # optional output validation
-    history=[                                          # optional multi-turn context
-        opd.Message(role=opd.MessageRole.USER, content="What is FP?"),
-        opd.Message(role=opd.MessageRole.ASSISTANT, content="Functional programming is..."),
-    ],
-    extra={"top_p": 0.9, "seed": 42},                 # provider-specific pass-through
+from ractogateway import openai_developer_kit as opd
+
+cfg = opd.ChatConfig(
+    user_message="Explain monads simply.",
+    temperature=0.2,
+    max_tokens=400,
+    extra={"top_p": 0.9},
 )
+print(cfg.model_dump())
+```
+
+### Output
+```text
+{'user_message': 'Explain monads simply.', 'prompt': None, 'temperature': 0.2, 'max_tokens': 400, 'tools': None, 'response_model': None, 'history': [], 'extra': {'top_p': 0.9}}
 ```
 
 ### `EmbeddingConfig`
 
-The input for `embed()` and `aembed()`.
-
+### Input
 ```python
-config = opd.EmbeddingConfig(
-    texts=["Hello world", "Goodbye world"],   # required, min 1 text
-    model="text-embedding-3-large",            # optional (overrides kit default)
-    dimensions=512,                            # optional (for models that support it)
+ecfg = opd.EmbeddingConfig(
+    texts=["first text", "second text"],
+    model="text-embedding-3-small",
+    dimensions=512,
 )
+print(ecfg.model_dump())
+```
+
+### Output
+```text
+{'texts': ['first text', 'second text'], 'model': 'text-embedding-3-small', 'dimensions': 512, 'extra': {}}
 ```
 
 ---
@@ -210,78 +324,89 @@ config = opd.EmbeddingConfig(
 
 ### `LLMResponse`
 
-Returned by `chat()` and `achat()`. Unified across all providers.
+### Input
+```python
+r = resp
+print(type(r.content).__name__)
+print(type(r.parsed).__name__ if r.parsed is not None else None)
+print(r.finish_reason)
+print(r.usage)
+```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `content` | `str \| None` | Cleaned text (markdown fences stripped) |
-| `parsed` | `dict \| list \| None` | Auto-parsed JSON (if response was valid JSON) |
-| `tool_calls` | `list[ToolCallResult]` | Tool calls requested by the model |
-| `finish_reason` | `FinishReason` | `STOP`, `TOOL_CALL`, `LENGTH`, `CONTENT_FILTER`, `ERROR` |
-| `usage` | `dict[str, int]` | `prompt_tokens`, `completion_tokens`, `total_tokens` |
-| `raw` | `Any` | The unmodified provider response (escape hatch) |
+### Output (example)
+```text
+str
+dict
+FinishReason.STOP
+{'prompt_tokens': 112, 'completion_tokens': 23, 'total_tokens': 135}
+```
 
 ### `StreamChunk`
 
-Yielded by `stream()` and `astream()`. One per streaming event.
+### Input
+```python
+chunk = next(iter(kit.stream(opd.ChatConfig(user_message="Say hello."))))
+print(chunk.delta.text)
+print(chunk.accumulated_text)
+print(chunk.is_final)
+```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `delta.text` | `str` | Incremental text for this chunk |
-| `accumulated_text` | `str` | Full text accumulated so far |
-| `is_final` | `bool` | `True` only on the last chunk |
-| `finish_reason` | `FinishReason \| None` | Set on final chunk only |
-| `tool_calls` | `list[ToolCallResult]` | Populated on final chunk only |
-| `usage` | `dict[str, int]` | Populated on final chunk only |
-| `raw` | `Any` | Raw provider streaming event |
+### Output (example)
+```text
+Hello
+Hello
+False
+```
 
 ### `EmbeddingResponse`
 
-Returned by `embed()` and `aembed()`.
+### Input
+```python
+print(eresp.vectors[0].index)
+print(eresp.vectors[0].text)
+print(len(eresp.vectors[0].embedding))
+```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `vectors` | `list[EmbeddingVector]` | Each has `.index`, `.text`, `.embedding` |
-| `model` | `str` | Model used for embedding |
-| `usage` | `dict[str, int]` | Token usage |
+### Output (example)
+```text
+0
+hello
+1536
+```
 
 ---
 
 ## RACTO Prompt Engine
 
-The RACTO principle structures every prompt into five unambiguous sections:
+RACTO fields:
+- `role`
+- `aim`
+- `constraints`
+- `tone`
+- `output_format`
 
-| Letter | Field | Purpose |
-| :---: | --- | --- |
-| **R** | `role` | Who the model is |
-| **A** | `aim` | What it must accomplish |
-| **C** | `constraints` | Hard rules it must never violate |
-| **T** | `tone` | Communication style |
-| **O** | `output_format` | Exact shape of the response |
+### Input (`compile()`)
+```python
+print(prompt.compile())
+```
 
-### Compiled Output
-
-`prompt.compile()` produces a clearly delimited system prompt:
-
+### Output (example)
 ```text
 [ROLE]
-You are a senior Python code reviewer at a Fortune 500 company.
+You are a senior Python reviewer.
 
 [AIM]
-Review the given code for bugs, security vulnerabilities, and PEP-8 violations.
+Find bugs and return JSON.
 
 [CONSTRAINTS]
-- Only report issues you are certain about.
-- Do not suggest stylistic preferences.
-- If no issues are found, say so explicitly.
-- Never fabricate code examples that you cannot verify.
+- Do not guess.
+- If no bug exists, return an empty issues list.
 
 [TONE]
-Professional and concise
+Professional
 
 [OUTPUT]
-Respond ONLY with valid JSON. Do NOT wrap the response in markdown code
-fences (```json … ```) or add any commentary before or after the JSON object.
+Respond ONLY with valid JSON. Do NOT wrap the response in markdown code fences (```json ... ```) or add any commentary before or after the JSON object.
 
 [GUARDRAILS]
 - If you are unsure or lack sufficient information, state it explicitly rather than guessing.
@@ -290,286 +415,146 @@ fences (```json … ```) or add any commentary before or after the JSON object.
 - If the answer requires assumptions, list each assumption explicitly before proceeding.
 ```
 
-### Advanced: Pydantic Schema as Output Format
-
-Pass a Pydantic model as `output_format` and the full JSON Schema is embedded directly in the prompt:
-
+### Input (Pydantic model as output schema)
 ```python
 from pydantic import BaseModel
+from ractogateway import RactoPrompt
 
-class CodeReview(BaseModel):
+class ReviewResult(BaseModel):
     issues: list[str]
-    severity: str
-    suggestion: str
+    risk: str
+    summary: str
 
-prompt = RactoPrompt(
-    role="You are a code reviewer.",
-    aim="Review the code.",
-    constraints=["Only report real issues."],
+schema_prompt = RactoPrompt(
+    role="You are a reviewer.",
+    aim="Return structured review output.",
+    constraints=["Only real issues."],
     tone="Concise",
-    output_format=CodeReview,     # JSON Schema embedded in prompt
+    output_format=ReviewResult,
 )
+
+compiled = schema_prompt.compile()
+print("JSON Schema:" in compiled)
+print("issues" in compiled and "risk" in compiled and "summary" in compiled)
 ```
 
-### Optional Fields
+### Output
+```text
+True
+True
+```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `context` | `str` | Domain background injected between AIM and CONSTRAINTS |
-| `examples` | `list[dict]` | Few-shot input/output pairs for steering |
-| `anti_hallucination` | `bool` | Append `[GUARDRAILS]` block (default `True`) |
+### Input (optional fields)
+```python
+p2 = RactoPrompt(
+    role="You are an analyst.",
+    aim="Answer question.",
+    constraints=["Be factual."],
+    tone="Neutral",
+    output_format="text",
+    context="Company dataset: Q1-Q4 2025 KPIs.",
+    examples=[{"input": "What is ARR?", "output": "Annual Recurring Revenue."}],
+    anti_hallucination=True,
+)
+print("[CONTEXT]" in p2.compile(), "[EXAMPLES]" in p2.compile(), "[GUARDRAILS]" in p2.compile())
+```
+
+### Output
+```text
+True True True
+```
 
 ---
 
-## Multimodal Attachments — Images & Files
+## Multimodal Attachments (RactoFile)
 
-`RactoFile` lets you attach images, PDFs, plain-text files, and any other binary file to a `to_messages()` call.
-The attachment is **automatically re-encoded** into the content-block schema expected by the target provider — you never write raw `image_url`, `inline_data`, or `source` dicts by hand.
+Teaching note:
+- `RactoFile` is fully supported in `prompt.to_messages(...)`.
+- Fine-tuning datasets support multimodal examples.
+- Current `ChatConfig` takes `user_message: str`, so for direct kit chat use text input.
 
-### Creating a `RactoFile`
-
-#### From a file path — MIME type is auto-detected
-
+### Input (`RactoFile.from_path` and `from_bytes`)
 ```python
 from ractogateway.prompts.engine import RactoFile
 
-img = RactoFile.from_path("/path/to/photo.jpg")       # image/jpeg
-doc = RactoFile.from_path("/path/to/report.pdf")      # application/pdf
-txt = RactoFile.from_path("/path/to/notes.txt")       # text/plain
+png_bytes = b"\x89PNG\r\n\x1a\nFAKEPNGDATA"
+txt_bytes = b"hello from text file"
+
+img = RactoFile.from_bytes(png_bytes, "image/png", name="chart.png")
+txt = RactoFile.from_bytes(txt_bytes, "text/plain", name="notes.txt")
+
+print(img.mime_type, img.is_image, img.is_pdf, img.is_text)
+print(txt.mime_type, txt.is_image, txt.is_pdf, txt.is_text)
 ```
 
-#### From raw bytes — MIME type supplied explicitly
-
-```python
-# From an open file handle
-with open("chart.png", "rb") as fh:
-    img = RactoFile.from_bytes(fh.read(), "image/png", name="chart.png")
-
-# From bytes already in memory (e.g. downloaded with requests)
-import requests
-resp = requests.get("https://example.com/diagram.png")
-img = RactoFile.from_bytes(resp.content, "image/png", name="diagram.png")
+### Output
+```text
+image/png True False False
+text/plain False False True
 ```
 
-### Passing Attachments to `to_messages()`
-
+### Input (OpenAI message conversion)
 ```python
-messages = prompt.to_messages(
-    "What does this chart show?",
-    attachments=[img],          # list[RactoFile], any length
-    provider="openai",          # "openai" | "anthropic" | "google" | "generic"
+msgs_openai = prompt.to_messages(
+    "Describe this attachment.",
+    attachments=[img, txt],
+    provider="openai",
 )
+print(msgs_openai[0]["role"])
+print(msgs_openai[1]["role"])
+print(type(msgs_openai[1]["content"]).__name__)
+print(msgs_openai[1]["content"][0]["type"], msgs_openai[1]["content"][-1]["type"])
 ```
 
-You can mix multiple files of different types in the same call:
+### Output
+```text
+system
+user
+list
+image_url text
+```
 
+### Input (Anthropic message conversion)
 ```python
-messages = prompt.to_messages(
-    "Summarise the attached report and explain the diagram.",
-    attachments=[
-        RactoFile.from_path("report.pdf"),
-        RactoFile.from_path("diagram.png"),
-    ],
+msgs_anth = prompt.to_messages(
+    "Summarize files.",
+    attachments=[img, txt],
     provider="anthropic",
 )
+print(msgs_anth[1]["content"][0]["type"])
+print(msgs_anth[1]["content"][1]["type"])
+print(msgs_anth[1]["content"][-1]["type"])
 ```
 
-### Provider Content-Block Output
-
-Each provider receives a different content-block shape. `to_messages()` handles the translation transparently.
-
-#### OpenAI / Generic
-
-Images and binary files become **`image_url`** blocks with an inline `data:` URI.
-Text files become **`text`** blocks.
-
-```python
-# prompt.to_messages("Describe the image.", attachments=[jpeg_file], provider="openai")
-[
-    {"role": "system", "content": "<compiled RACTO system prompt>"},
-    {
-        "role": "user",
-        "content": [
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": "data:image/jpeg;base64,/9j/4AAQSkZJRgAB..."
-                }
-            },
-            {"type": "text", "text": "Describe the image."}
-        ]
-    }
-]
+### Output
+```text
+image
+text
+text
 ```
 
-#### Anthropic Claude
-
-- Images → **`image`** content block with `base64` source
-- PDFs → **`document`** content block with `base64` source
-- Text files → **`text`** content block (decoded UTF-8)
-- Other binary → **`text`** block with a labelled base-64 payload
-
+### Input (Google message conversion)
 ```python
-# prompt.to_messages("Summarise.", attachments=[pdf_file], provider="anthropic")
-[
-    {"role": "system", "content": "<compiled RACTO system prompt>"},
-    {
-        "role": "user",
-        "content": [
-            {
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": "JVBERi0xLjQK..."
-                }
-            },
-            {"type": "text", "text": "Summarise."}
-        ]
-    }
-]
-```
-
-#### Google Gemini
-
-- Text files → **`text`** parts (decoded UTF-8)
-- All other files → **`inline_data`** parts with `mime_type` and base-64 `data`
-
-```python
-# prompt.to_messages("What is in this image?", attachments=[png_file], provider="google")
-[
-    {"role": "system", "content": "<compiled RACTO system prompt>"},
-    {
-        "role": "user",
-        "content": [
-            {
-                "inline_data": {
-                    "mime_type": "image/png",
-                    "data": "iVBORw0KGgoAAAANS..."
-                }
-            },
-            {"text": "What is in this image?"}
-        ]
-    }
-]
-```
-
-### Supported File Types
-
-| File type | MIME type | OpenAI | Anthropic | Google |
-| --- | --- | :---: | :---: | :---: |
-| JPEG image | `image/jpeg` | `image_url` block | `image` block | `inline_data` part |
-| PNG image | `image/png` | `image_url` block | `image` block | `inline_data` part |
-| GIF image | `image/gif` | `image_url` block | `image` block | `inline_data` part |
-| WebP image | `image/webp` | `image_url` block | `image` block | `inline_data` part |
-| PDF document | `application/pdf` | `image_url` block | `document` block | `inline_data` part |
-| Plain text | `text/plain` | `text` block | `text` block | `text` part |
-| Any other | `*/*` | `image_url` block (data URI) | labelled `text` block | `inline_data` part |
-
-> MIME type detection is fully automatic when using `RactoFile.from_path()`. When using `RactoFile.from_bytes()`, supply the MIME type explicitly.
-
-### Full End-to-End Example — OpenAI Vision
-
-```python
-from ractogateway import RactoPrompt
-from ractogateway.prompts.engine import RactoFile
-from ractogateway import openai_developer_kit as opd
-
-prompt = RactoPrompt(
-    role="You are a data analyst specialising in chart interpretation.",
-    aim="Describe what the attached chart shows and extract the key insights.",
-    constraints=[
-        "Only describe what is visible in the image.",
-        "Never invent data points that are not in the chart.",
-    ],
-    tone="Clear and concise",
-    output_format="text",
+msgs_google = prompt.to_messages(
+    "What is in the file?",
+    attachments=[img, txt],
+    provider="google",
 )
-
-kit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
-
-config = opd.ChatConfig(
-    user_message="What does this chart show?",
-    attachments=[RactoFile.from_path("sales_q4.png")],
-)
-
-response = kit.chat(config)
-print(response.content)
-# "The bar chart shows Q4 2024 sales figures across four regions..."
+print("inline_data" in msgs_google[1]["content"][0])
+print("text" in msgs_google[1]["content"][1])
 ```
 
-### Full End-to-End Example — Anthropic (Image + PDF)
-
-```python
-from ractogateway import RactoPrompt
-from ractogateway.prompts.engine import RactoFile
-from ractogateway import anthropic_developer_kit as anth
-
-prompt = RactoPrompt(
-    role="You are a financial analyst.",
-    aim="Summarise the key financial metrics from the attached report and diagram.",
-    constraints=["Only extract facts present in the documents.", "Be concise."],
-    tone="Professional",
-    output_format="text",
-)
-
-kit = anth.AnthropicDeveloperKit(model="claude-sonnet-4-5-20250929", default_prompt=prompt)
-
-config = anth.ChatConfig(
-    user_message="Summarise the attached report and explain the chart.",
-    attachments=[
-        RactoFile.from_path("annual_report.pdf"),
-        RactoFile.from_path("revenue_chart.png"),
-    ],
-)
-
-response = kit.chat(config)
-print(response.content)
+### Output
+```text
+True
+True
 ```
-
-### Full End-to-End Example — From Bytes (e.g. API download)
-
-```python
-import requests
-from ractogateway.prompts.engine import RactoFile
-
-# Fetch an image from an external URL
-resp = requests.get("https://example.com/chart.png")
-chart = RactoFile.from_bytes(resp.content, "image/png", name="chart.png")
-
-# Or read from a file handle
-with open("report.pdf", "rb") as fh:
-    pdf = RactoFile.from_bytes(fh.read(), "application/pdf", name="report.pdf")
-
-messages = prompt.to_messages(
-    "Analyse this chart and report.",
-    attachments=[chart, pdf],
-    provider="anthropic",
-)
-```
-
-### `RactoFile` API Reference
-
-| Member | Description |
-| --- | --- |
-| `RactoFile.from_path(path)` | Load from disk; MIME type auto-detected via `mimetypes`. Raises `FileNotFoundError` if path is missing. |
-| `RactoFile.from_bytes(data, mime_type, name="")` | Wrap raw bytes; MIME type must be supplied explicitly. |
-| `.data` | `bytes` — raw file content |
-| `.mime_type` | `str` — MIME type string, e.g. `"image/png"` |
-| `.name` | `str` — filename hint (empty string if not provided) |
-| `.base64_data` | `str` — file bytes encoded as a base-64 ASCII string |
-| `.is_image` | `bool` — `True` for `image/jpeg`, `image/png`, `image/gif`, `image/webp` |
-| `.is_pdf` | `bool` — `True` for `application/pdf` |
-| `.is_text` | `bool` — `True` for any `text/*` MIME type |
 
 ---
 
 ## Tool Calling
 
-Define tools as Python functions — never write nested JSON dicts.
-
-### Register Tools
-
+### Input (register tools)
 ```python
 from ractogateway import ToolRegistry
 
@@ -577,362 +562,284 @@ registry = ToolRegistry()
 
 @registry.register
 def get_weather(city: str, unit: str = "celsius") -> str:
-    """Get the current weather for a city.
+    """Get weather by city."""
+    return f"{city}: 22 degrees ({unit})"
 
-    :param city: The city name
-    :param unit: Temperature unit (celsius or fahrenheit)
-    """
-    # Your implementation here
-    return f"Weather in {city}: 22°{unit[0].upper()}"
+print(len(registry))
+print(registry.schemas[0].name)
+print(registry.schemas[0].to_json_schema())
 ```
 
-### Use with Any Kit
+### Output
+```text
+1
+get_weather
+{'type': 'object', 'properties': {'city': {'type': 'string'}, 'unit': {'type': 'string', 'default': 'celsius'}}, 'required': ['city'], 'additionalProperties': False}
+```
 
+### Input (use tool registry in chat)
 ```python
-config = opd.ChatConfig(
-    user_message="What's the weather in Tokyo?",
+cfg = opd.ChatConfig(
+    user_message="What is the weather in Tokyo?",
     tools=registry,
 )
-response = kit.chat(config)
+r = kit.chat(cfg)
 
-if response.tool_calls:
-    for tc in response.tool_calls:
-        print(f"Call: {tc.name}({tc.arguments})")
-        # Execute the function
-        fn = registry.get_callable(tc.name)
-        result = fn(**tc.arguments)
+print("tool calls:", len(r.tool_calls))
+for tc in r.tool_calls:
+    fn = registry.get_callable(tc.name)
+    result = fn(**tc.arguments) if fn else "missing tool"
+    print(tc.name, tc.arguments, "=>", result)
 ```
 
-### Register Pydantic Models as Tools
-
-```python
-from pydantic import BaseModel, Field
-
-class SearchQuery(BaseModel):
-    """Search the knowledge base."""
-    query: str = Field(description="The search query")
-    max_results: int = Field(default=5, description="Maximum results to return")
-
-registry.register(SearchQuery)
+### Output (example if model decides to call tool)
+```text
+tool calls: 1
+get_weather {'city': 'Tokyo', 'unit': 'celsius'} => Tokyo: 22 degrees (celsius)
 ```
 
 ---
 
 ## Validated Response Models
 
-Force the LLM output through a Pydantic model for guaranteed structure:
-
+### Input
 ```python
+from pydantic import BaseModel
+
 class SentimentResult(BaseModel):
-    sentiment: str       # "positive", "negative", "neutral"
-    confidence: float    # 0.0 to 1.0
+    sentiment: str
+    confidence: float
     reasoning: str
 
-config = opd.ChatConfig(
+cfg = opd.ChatConfig(
     user_message="Analyze sentiment: 'This product is amazing!'",
     response_model=SentimentResult,
 )
-response = kit.chat(config)
-print(response.parsed)
-# {"sentiment": "positive", "confidence": 0.95, "reasoning": "Strong positive adjective 'amazing'"}
+r = kit.chat(cfg)
+print(r.parsed)
+```
+
+### Output (example)
+```text
+{'sentiment': 'positive', 'confidence': 0.95, 'reasoning': "The adjective 'amazing' indicates strong positive sentiment."}
 ```
 
 ---
 
-## Switching Providers
+## Gateway (Unified Runner)
 
-Same `ChatConfig`, different kit. That's it.
+`Gateway` lets you drive any adapter from one runner class.
 
+### Input
+```python
+from ractogateway import Gateway
+from ractogateway.adapters.openai_kit import OpenAILLMKit
+
+adapter = OpenAILLMKit(model="gpt-4o", api_key="sk-...")
+gw = Gateway(adapter=adapter, default_prompt=prompt)
+
+r = gw.run(user_message="Return one-line summary of Python decorators.")
+print(r.content)
+print(r.finish_reason)
+```
+
+### Output (example)
+```text
+Decorators are callables that wrap functions/classes to extend behavior without changing original source.
+FinishReason.STOP
+```
+
+---
+
+## Switching Providers (Same Pattern, Different Kit)
+
+### Input
 ```python
 from ractogateway import openai_developer_kit as opd
 from ractogateway import google_developer_kit as god
 from ractogateway import anthropic_developer_kit as anth
-from ractogateway import RactoPrompt
 
-prompt = RactoPrompt(
-    role="You are a helpful assistant.",
-    aim="Answer the user's question accurately.",
-    constraints=["Be concise.", "Cite sources when possible."],
-    tone="Friendly and professional",
-    output_format="text",
-)
+cfg = opd.ChatConfig(user_message="What is quantum computing in one sentence?")
 
-config = opd.ChatConfig(user_message="What is quantum computing?")
-
-# OpenAI
 okit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
-print(okit.chat(config).content)
-
-# Google Gemini
 gkit = god.GoogleDeveloperKit(model="gemini-2.0-flash", default_prompt=prompt)
-print(gkit.chat(config).content)
-
-# Anthropic Claude
 akit = anth.AnthropicDeveloperKit(model="claude-sonnet-4-5-20250929", default_prompt=prompt)
-print(akit.chat(config).content)
+
+print("openai:", okit.chat(cfg).content[:60])
+print("google:", gkit.chat(cfg).content[:60])
+print("anthropic:", akit.chat(cfg).content[:60])
+```
+
+### Output (example)
+```text
+openai: Quantum computing uses qubits that can exist in superpositions
+google: Quantum computing is a model of computation using qubits
+anthropic: Quantum computing processes information using quantum states
 ```
 
 ---
 
-## Fine-Tuning — Multimodal Training Pipeline
+## RAG (Retrieval-Augmented Generation)
 
-RactoGateway ships a production-grade fine-tuning module that works with **OpenAI**, **Google Gemini**, and **Anthropic Claude** using a single, unified dataset API.
+This is a fully local teaching demo using:
+- `InMemoryVectorStore`
+- a tiny custom embedder
+- a tiny mock LLM kit
 
+No external API keys required for this demo.
+
+### Input
 ```python
-from ractogateway import (
-    RactoDataset,
-    RactoTrainingExample,
-    RactoTrainingMessage,
-    OpenAIFineTuner,
-    GeminiFineTuner,
-    AnthropicFineTuner,
+from ractogateway import RactoRAG, InMemoryVectorStore
+from ractogateway.adapters.base import LLMResponse
+from ractogateway.rag.embedders.base import BaseEmbedder
+
+class ToyEmbedder(BaseEmbedder):
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[float(len(t)), float(sum(ord(c) for c in t) % 997)] for t in texts]
+
+    async def aembed(self, texts: list[str]) -> list[list[float]]:
+        return self.embed(texts)
+
+class ToyLLMKit:
+    def chat(self, config):
+        return LLMResponse(content="Answer based on retrieved context: OpenAI, Google, Anthropic.")
+
+    async def achat(self, config):
+        return self.chat(config)
+
+rag = RactoRAG(
+    vector_store=InMemoryVectorStore(),
+    embedder=ToyEmbedder(),
+    llm_kit=ToyLLMKit(),
 )
-# or via the sub-package
-from ractogateway.finetune import RactoDataset, OpenAIFineTuner
+
+rag.ingest_text("RactoGateway unifies OpenAI, Google Gemini, and Anthropic Claude.", source="intro")
+rag.ingest_text("It also supports tool calling, embeddings, and structured outputs.", source="features")
+
+print("indexed chunks:", rag.count())
+
+hits = rag.retrieve("Which providers are supported?", top_k=2)
+for h in hits:
+    print(h.rank, round(h.score, 4), h.chunk.metadata.source)
+
+answer = rag.query("Which providers are supported?", top_k=2)
+print(answer.answer.content)
+print("sources used:", len(answer.sources))
 ```
 
-### Core Classes
-
-| Class | Role |
-| --- | --- |
-| `RactoTrainingMessage` | One conversation turn — role + text + optional `RactoFile` attachments |
-| `RactoTrainingExample` | Full conversation (one training record) — list of `RactoTrainingMessage` |
-| `RactoDataset` | Collection of examples with validation, split, and JSONL export |
-| `OpenAIFineTuner` | Upload → train → poll on OpenAI |
-| `GeminiFineTuner` | Create tuning job → poll on Google AI |
-| `AnthropicFineTuner` | Upload → train → poll on Anthropic |
+### Output
+```text
+indexed chunks: 2
+1 0.9999 intro
+2 0.9987 features
+Answer based on retrieved context: OpenAI, Google, Anthropic.
+sources used: 2
+```
 
 ---
 
-### Step 1 — Assemble Training Data
+## Fine-Tuning (Dataset + Tuners)
 
-#### Text-only dataset (quickest path)
+RactoGateway gives one dataset model for all providers.
 
+### Step 1: Build dataset
+
+### Input
 ```python
 from ractogateway import RactoDataset
 
 ds = RactoDataset.from_pairs(
     [
-        ("What is a Python list?",  "An ordered, mutable sequence of items."),
-        ("What is a Python dict?",  "An unordered key-value mapping."),
-        ("What is a Python tuple?", "An ordered, immutable sequence."),
+        ("What is a list?", "An ordered, mutable sequence."),
+        ("What is a dict?", "A key-value mapping."),
+        ("What is a tuple?", "An ordered, immutable sequence."),
     ],
-    system="You are a concise Python tutor. Answer in one sentence.",
+    system="You are a concise Python tutor.",
 )
+
 print(ds.summary())
-# {"examples": 3, "total_messages": 9, "avg_turns_per_example": 3.0, "multimodal_examples": 0}
 ```
 
-#### Multi-turn conversation
+### Output
+```text
+{'examples': 3, 'total_messages': 9, 'avg_turns_per_example': 3.0, 'multimodal_examples': 0}
+```
 
+### Step 2: Validate and split
+
+### Input
 ```python
-from ractogateway import RactoTrainingExample, RactoTrainingMessage, RactoDataset
+errors = ds.validate("openai")
+print(errors)
 
-example = RactoTrainingExample.from_conversation([
-    ("system",    "You are a helpful travel assistant."),
-    ("user",      "I want to visit Japan. What season is best?"),
-    ("assistant", "Spring (March–May) for cherry blossoms, or Autumn (Sept–Nov) for foliage."),
-    ("user",      "Which cities should I visit?"),
-    ("assistant", "Tokyo, Kyoto, Osaka, and Hiroshima are the most popular."),
-])
-
-ds = RactoDataset([example])
+train_ds, val_ds = ds.split(train_ratio=0.67, seed=42)
+print("train:", len(train_ds), "val:", len(val_ds))
 ```
 
-#### Multimodal example (image + text)
+### Output
+```text
+[]
+train: 2 val: 1
+```
 
+### Step 3: Export JSONL
+
+### Input
 ```python
-from ractogateway import RactoTrainingExample, RactoDataset
-from ractogateway.prompts.engine import RactoFile
+train_ds.export_jsonl("train_openai.jsonl", provider="openai", overwrite=True)
+train_ds.export_jsonl("train_anthropic.jsonl", provider="anthropic", overwrite=True)
+train_ds.export_jsonl("train_gemini.jsonl", provider="gemini", overwrite=True)
 
-# From a file on disk
-chart = RactoFile.from_path("sales_chart.png")
-
-# From raw bytes (e.g. captured from an API or camera)
-with open("invoice.png", "rb") as fh:
-    invoice = RactoFile.from_bytes(fh.read(), "image/png", name="invoice.png")
-
-example = RactoTrainingExample.from_pair(
-    user="Describe the trend shown in this chart.",
-    assistant="Revenue grew by 23% quarter-over-quarter, peaking in December.",
-    system="You are a data analyst. Be concise and factual.",
-    user_attachments=[chart],
-)
-
-ds = RactoDataset([example])
+print(train_ds.to_jsonl_string("openai").splitlines()[0])
+print(train_ds.to_jsonl_string("anthropic").splitlines()[0])
+print(train_ds.to_jsonl_string("gemini").splitlines()[0])
 ```
 
-#### Add examples incrementally
-
-```python
-ds = RactoDataset()
-
-ds.add(RactoTrainingExample.from_pair("Q1", "A1", system="You are helpful."))
-ds.add(RactoTrainingExample.from_pair("Q2", "A2", system="You are helpful."))
-
-# Or batch-extend
-ds.extend([
-    RactoTrainingExample.from_pair(u, a)
-    for u, a in [("Q3", "A3"), ("Q4", "A4")]
-])
+### Output (example)
+```text
+{"messages": [{"role": "system", "content": "You are a concise Python tutor."}, {"role": "user", "content": "What is a tuple?"}, {"role": "assistant", "content": "An ordered, immutable sequence."}]}
+{"messages": [{"role": "user", "content": "What is a tuple?"}, {"role": "assistant", "content": "An ordered, immutable sequence."}], "system": "You are a concise Python tutor."}
+{"text_input": "What is a tuple?", "output": "An ordered, immutable sequence."}
 ```
 
----
+### Step 4: Run provider tuner (requires API key access)
 
-### Step 2 — Validate and Split
-
-```python
-# Validate before uploading (catches empty content, wrong role order, etc.)
-errors = ds.validate(provider="openai")   # or "anthropic" / "gemini"
-if errors:
-    for e in errors:
-        print(e)
-else:
-    print("Dataset is valid.")
-
-# Reproducible 80/20 train-validation split
-train_ds, val_ds = ds.split(train_ratio=0.8, seed=42)
-print(f"Train: {len(train_ds)}  |  Val: {len(val_ds)}")
-```
-
----
-
-### Step 3 — Export to JSONL (optional inspection)
-
-```python
-train_ds.export_jsonl("train.jsonl",      provider="openai",     overwrite=True)
-val_ds.export_jsonl("val.jsonl",          provider="openai",     overwrite=True)
-train_ds.export_jsonl("train_ant.jsonl",  provider="anthropic",  overwrite=True)
-train_ds.export_jsonl("train_gem.jsonl",  provider="gemini",     overwrite=True)
-```
-
-**OpenAI JSONL output** (`train.jsonl`):
-
-```json
-{"messages": [{"role": "system", "content": "You are a Python tutor."}, {"role": "user", "content": "What is a list?"}, {"role": "assistant", "content": "An ordered, mutable sequence."}]}
-{"messages": [{"role": "system", "content": "You are a Python tutor."}, {"role": "user", "content": "What is a dict?"}, {"role": "assistant", "content": "A key-value mapping."}]}
-```
-
-**Anthropic JSONL output** (`train_ant.jsonl`):
-
-```json
-{"system": "You are a Python tutor.", "messages": [{"role": "user", "content": "What is a list?"}, {"role": "assistant", "content": "An ordered, mutable sequence."}]}
-```
-
-**Gemini JSONL output** (`train_gem.jsonl`):
-
-```json
-{"text_input": "What is a list?", "output": "An ordered, mutable sequence."}
-```
-
-**OpenAI multimodal JSONL output** (when the user turn has an image):
-
-```json
-{
-  "messages": [
-    {"role": "system", "content": "You are a data analyst."},
-    {
-      "role": "user",
-      "content": [
-        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBOR…"}},
-        {"type": "text", "text": "Describe the trend."}
-      ]
-    },
-    {"role": "assistant", "content": "Revenue grew 23% quarter-over-quarter."}
-  ]
-}
-```
-
-**Anthropic multimodal JSONL output**:
-
-```json
-{
-  "system": "You are a data analyst.",
-  "messages": [
-    {
-      "role": "user",
-      "content": [
-        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBOR…"}},
-        {"type": "text", "text": "Describe the trend."}
-      ]
-    },
-    {"role": "assistant", "content": "Revenue grew 23% quarter-over-quarter."}
-  ]
-}
-```
-
----
-
-### Step 4 — Fine-Tune
-
-#### OpenAI — one call
-
+### Input (OpenAI one-call pipeline)
 ```python
 from ractogateway import OpenAIFineTuner
 
-tuner = OpenAIFineTuner(api_key="sk-...")   # or set OPENAI_API_KEY
-
+tuner = OpenAIFineTuner(api_key="sk-...")
 fine_tuned_model = tuner.run_pipeline(
     train_ds,
-    model="gpt-4o-mini-2024-07-18",       # supports vision fine-tuning: gpt-4o-2024-08-06
+    model="gpt-4o-mini-2024-07-18",
     validation_dataset=val_ds,
     n_epochs=3,
     suffix="python-tutor",
     verbose=True,
 )
-# [OpenAIFineTuner] Uploading 80 training examples…
-# [OpenAIFineTuner] Training file: file-abc123
-# [OpenAIFineTuner] Job created: ftjob-xyz789
-# [OpenAIFineTuner] Job ftjob-xyz789 → running
-# [OpenAIFineTuner] Done!  Fine-tuned model: ft:gpt-4o-mini-2024-07-18:org::python-tutor-abc
-
-# Use immediately
-from ractogateway import openai_developer_kit as opd
-kit = opd.OpenAIDeveloperKit(model=fine_tuned_model)
-response = kit.chat(opd.ChatConfig(user_message="What is a generator?"))
-print(response.content)
+print("model:", fine_tuned_model)
 ```
 
-#### OpenAI — step by step
-
-```python
-tuner = OpenAIFineTuner()
-
-# 1. Upload files
-train_file_id = tuner.upload_dataset(train_ds)
-val_file_id   = tuner.upload_dataset(val_ds)
-
-# 2. Create job
-job_id = tuner.create_job(
-    train_file_id,
-    model="gpt-4o-mini-2024-07-18",
-    validation_file=val_file_id,
-    n_epochs=3,
-    suffix="python-tutor",
-)
-
-# 3. Check status (non-blocking)
-print(tuner.get_status(job_id))
-# {"id": "ftjob-…", "status": "running", "model": "gpt-4o-mini-2024-07-18", …}
-
-# 4. Stream training events
-for event in tuner.list_events(job_id, limit=10):
-    print(event["message"])
-
-# 5. Block until done
-fine_tuned_model = tuner.wait_for_completion(job_id, poll_interval=30)
+### Output (example)
+```text
+[OpenAIFineTuner] Uploading 2 training examples (0 multimodal)...
+[OpenAIFineTuner] Training file: file-abc123
+[OpenAIFineTuner] Uploading 1 validation examples...
+[OpenAIFineTuner] Validation file: file-val123
+[OpenAIFineTuner] Job created: ftjob-xyz789
+[OpenAIFineTuner] Job ftjob-xyz789 -> running
+[OpenAIFineTuner] Job ftjob-xyz789 -> succeeded
+[OpenAIFineTuner] Done!  Fine-tuned model: ft:gpt-4o-mini-2024-07-18:org::python-tutor-abc
+model: ft:gpt-4o-mini-2024-07-18:org::python-tutor-abc
 ```
 
-#### Google Gemini — one call
-
+### Input (Gemini one-call pipeline, text pairs only)
 ```python
 from ractogateway import GeminiFineTuner
 
-tuner = GeminiFineTuner(api_key="AIza...")   # or set GEMINI_API_KEY
-
-# Gemini requires single-turn text-pair examples
-# (multimodal / multi-turn requires Vertex AI)
-tuned_model = tuner.run_pipeline(
+gtuner = GeminiFineTuner(api_key="AIza...")
+tuned_model = gtuner.run_pipeline(
     train_ds,
     base_model="models/gemini-1.5-flash-001-tuning",
     display_name="python-tutor",
@@ -940,41 +847,24 @@ tuned_model = tuner.run_pipeline(
     batch_size=4,
     verbose=True,
 )
-# [GeminiFineTuner] Starting tuning with 80 examples…
-# [GeminiFineTuner] State: CREATING (12%)
-# [GeminiFineTuner] Done!  Tuned model: tunedModels/python-tutor-abc123
-
-from ractogateway import google_developer_kit as god
-kit = god.GoogleDeveloperKit(model=tuned_model)
+print("model:", tuned_model)
 ```
 
-#### Google Gemini — step by step
-
-```python
-tuner = GeminiFineTuner()
-
-operation = tuner.create_job(
-    train_ds,
-    base_model="models/gemini-1.5-flash-001-tuning",
-    display_name="my-tuned-model",
-    epoch_count=5,
-)
-
-# List / inspect / delete tuned models
-for m in tuner.list_models():
-    print(m["name"], m["state"])
-
-tuned_model = tuner.wait_for_completion(operation)
+### Output (example)
+```text
+[GeminiFineTuner] Starting tuning with 2 examples...
+[GeminiFineTuner] State: CREATING (15%)
+[GeminiFineTuner] State: RUNNING (80%)
+[GeminiFineTuner] Done!  Tuned model: tunedModels/python-tutor-abc123
+model: tunedModels/python-tutor-abc123
 ```
 
-#### Anthropic Claude — one call
-
+### Input (Anthropic one-call pipeline)
 ```python
 from ractogateway import AnthropicFineTuner
 
-tuner = AnthropicFineTuner(api_key="sk-ant-...")   # or set ANTHROPIC_API_KEY
-
-fine_tuned_model = tuner.run_pipeline(
+atuner = AnthropicFineTuner(api_key="sk-ant-...")
+amodel = atuner.run_pipeline(
     train_ds,
     model="claude-3-haiku-20240307",
     validation_dataset=val_ds,
@@ -982,226 +872,148 @@ fine_tuned_model = tuner.run_pipeline(
     hyperparameters={"n_epochs": 3},
     verbose=True,
 )
-# [AnthropicFineTuner] Uploading 80 training examples…
-# [AnthropicFineTuner] Training file: file-…
-# [AnthropicFineTuner] Job created: ftjob-…
-# [AnthropicFineTuner] Done!  Fine-tuned model: claude-3-haiku-20240307:ft:…
-
-from ractogateway import anthropic_developer_kit as anth
-kit = anth.AnthropicDeveloperKit(model=fine_tuned_model)
+print("model:", amodel)
 ```
 
----
-
-### Full Multimodal Pipeline Example
-
-End-to-end: build a vision model that describes product images.
-
-```python
-import os
-from ractogateway import (
-    RactoDataset,
-    RactoTrainingExample,
-    OpenAIFineTuner,
-    openai_developer_kit as opd,
-)
-from ractogateway.prompts.engine import RactoFile, RactoPrompt
-
-# --- 1. Build multimodal dataset ---
-ds = RactoDataset()
-
-image_answer_pairs = [
-    ("product_a.jpg", "A red ceramic mug with a black handle, 350ml capacity."),
-    ("product_b.jpg", "A stainless steel water bottle, 750ml, matte finish."),
-    ("product_c.jpg", "A glass pitcher with a bamboo lid, 1.2L capacity."),
-    # ... hundreds more
-]
-
-for img_path, description in image_answer_pairs:
-    ds.add(
-        RactoTrainingExample.from_pair(
-            user="Describe this product precisely.",
-            assistant=description,
-            system="You are a product cataloguer. Output one factual sentence.",
-            user_attachments=[RactoFile.from_path(img_path)],
-        )
-    )
-
-print(ds.summary())
-# {"examples": 3, "total_messages": 9, "avg_turns_per_example": 3.0, "multimodal_examples": 3}
-
-# --- 2. Validate and split ---
-errors = ds.validate("openai")
-assert not errors, errors
-
-train_ds, val_ds = ds.split(0.85, seed=0)
-
-# --- 3. Export for inspection ---
-train_ds.export_jsonl("train.jsonl", provider="openai", overwrite=True)
-
-# --- 4. Fine-tune (vision model) ---
-tuner = OpenAIFineTuner()
-fine_tuned_model = tuner.run_pipeline(
-    train_ds,
-    model="gpt-4o-2024-08-06",   # vision-capable base model
-    validation_dataset=val_ds,
-    n_epochs=3,
-    suffix="product-cataloguer",
-)
-
-# --- 5. Use the fine-tuned model ---
-prompt = RactoPrompt(
-    role="You are a product cataloguer.",
-    aim="Describe the product in the image.",
-    constraints=["One sentence only.", "Include material, colour, and capacity."],
-    tone="Factual",
-    output_format="text",
-)
-kit = opd.OpenAIDeveloperKit(model=fine_tuned_model, default_prompt=prompt)
-config = opd.ChatConfig(
-    user_message="Describe this product.",
-    attachments=[RactoFile.from_path("new_product.jpg")],
-)
-print(kit.chat(config).content)
-```
-
----
-
-### `RactoDataset` API Reference
-
-| Member | Description |
-| --- | --- |
-| `RactoDataset.from_pairs(pairs, system="")` | Build from `(user, assistant)` text tuples |
-| `RactoDataset.from_jsonl(path, provider)` | Load a previously exported JSONL file |
-| `.add(example)` | Append one `RactoTrainingExample` |
-| `.extend(examples)` | Append a list of examples |
-| `.validate(provider)` | Returns `list[str]` of errors (empty = valid) |
-| `.split(train_ratio, seed)` | Returns `(train_ds, val_ds)` |
-| `.shuffle(seed)` | Returns a new shuffled dataset |
-| `.export_jsonl(path, provider, overwrite)` | Write to `.jsonl` file on disk |
-| `.to_jsonl_string(provider)` | Return JSONL as a `str` (no I/O) |
-| `.summary()` | Dict with `examples`, `multimodal_examples`, etc. |
-
-### `RactoTrainingExample` API Reference
-
-| Member | Description |
-| --- | --- |
-| `RactoTrainingExample.from_pair(user, assistant, system, user_attachments)` | Single-turn factory |
-| `RactoTrainingExample.from_conversation(turns)` | From `[(role, content), …]` list |
-| `.to_openai_dict()` | `{"messages": […]}` for OpenAI JSONL |
-| `.to_anthropic_dict()` | `{"system": "…", "messages": […]}` for Anthropic JSONL |
-| `.to_gemini_dict()` | `{"text_input": …, "output": …}` or `{"contents": […]}` for Gemini |
-
-### Provider Fine-Tuning Support Matrix
-
-| Feature | OpenAI | Gemini | Anthropic |
-| --- | :---: | :---: | :---: |
-| Text-only fine-tuning | Yes | Yes | Yes |
-| Multimodal (image) fine-tuning | Yes (`gpt-4o-2024-08-06`) | Vertex AI only | Yes |
-| Multi-turn conversations | Yes | Vertex AI only | Yes |
-| Validation dataset | Yes | No | Yes |
-| Hyperparameter control | epochs, batch, LR | epochs, batch, LR | epochs |
-| `run_pipeline()` one-liner | Yes | Yes | Yes |
-
----
-
-## Architecture
-
+### Output (example)
 ```text
-src/ractogateway/
-├── __init__.py                          # Top-level: RactoPrompt, Gateway, tool, ToolRegistry
-├── py.typed                             # PEP 561 typed package marker
-│
-├── _models/                             # Shared Pydantic input/output models
-│   ├── chat.py                          #   ChatConfig, Message, MessageRole
-│   ├── stream.py                        #   StreamChunk, StreamDelta
-│   └── embedding.py                     #   EmbeddingConfig, EmbeddingResponse, EmbeddingVector
-│
-├── prompts/                             # RACTO Prompt Engine
-│   └── engine.py                        #   RactoPrompt, RactoFile, compile(), to_messages()
-│
-├── finetune/                            # Multimodal Fine-Tuning Pipeline
-│   ├── dataset.py                       #   RactoTrainingMessage, RactoTrainingExample, RactoDataset
-│   ├── openai_tuner.py                  #   OpenAIFineTuner
-│   ├── gemini_tuner.py                  #   GeminiFineTuner
-│   └── anthropic_tuner.py              #   AnthropicFineTuner
-│
-├── tools/                               # Tool Registry
-│   └── registry.py                      #   @tool decorator, ToolRegistry, ToolSchema
-│
-├── adapters/                            # Internal provider adapters (Adapter Pattern)
-│   ├── base.py                          #   BaseLLMAdapter ABC, LLMResponse, FinishReason
-│   ├── openai_kit.py                    #   OpenAILLMKit
-│   ├── google_kit.py                    #   GoogleLLMKit
-│   └── anthropic_kit.py                 #   AnthropicLLMKit
-│
-├── gateway/                             # Unified Gateway Runner
-│   └── runner.py                        #   Gateway orchestrator class
-│
-├── openai_developer_kit/                # OpenAI Developer Kit (import as opd)
-│   └── kit.py                           #   OpenAIDeveloperKit class
-│
-├── google_developer_kit/                # Google Developer Kit (import as god)
-│   └── kit.py                           #   GoogleDeveloperKit class
-│
-└── anthropic_developer_kit/             # Anthropic Developer Kit (import as anth)
-    └── kit.py                           #   AnthropicDeveloperKit class
+[AnthropicFineTuner] Uploading 2 training examples (0 multimodal)...
+[AnthropicFineTuner] Training file: file-abc
+[AnthropicFineTuner] Uploading 1 validation examples...
+[AnthropicFineTuner] Validation file: file-val
+[AnthropicFineTuner] Job created: ftjob-123
+[AnthropicFineTuner] Job ftjob-123 -> running
+[AnthropicFineTuner] Job ftjob-123 -> completed
+[AnthropicFineTuner] Done!  Fine-tuned model: claude-3-haiku-20240307:ft:org:suffix:abc
+model: claude-3-haiku-20240307:ft:org:suffix:abc
 ```
-
-### Design Principles
-
-- **Lazy provider imports** — `openai`, `google-genai`, and `anthropic` SDKs are only imported when you instantiate a kit. `import ractogateway` never fails due to a missing optional dependency.
-- **Composition over inheritance** — Developer kits compose internal adapters rather than extending them, keeping the public API surface clean.
-- **Pydantic everywhere** — Every input is a validated model. Every output is a typed model. No `dict[str, Any]` at the API boundary.
-- **Sync + async parity** — Every method has both a synchronous and asynchronous variant.
-- **Provider-agnostic tool schemas** — Define tools once, use them with any provider. The internal adapters handle the translation.
 
 ---
 
 ## Environment Variables
 
-| Variable | Provider | Description |
-| --- | --- | --- |
-| `OPENAI_API_KEY` | OpenAI | API key (used when `api_key` not passed to constructor) |
-| `GEMINI_API_KEY` | Google | API key (used when `api_key` not passed to constructor) |
-| `ANTHROPIC_API_KEY` | Anthropic | API key (used when `api_key` not passed to constructor) |
+### Input
+```python
+import os
+print("OPENAI_API_KEY set:", bool(os.getenv("OPENAI_API_KEY")))
+print("GEMINI_API_KEY set:", bool(os.getenv("GEMINI_API_KEY")))
+print("ANTHROPIC_API_KEY set:", bool(os.getenv("ANTHROPIC_API_KEY")))
+```
+
+### Output (example)
+```text
+OPENAI_API_KEY set: True
+GEMINI_API_KEY set: False
+ANTHROPIC_API_KEY set: True
+```
+
+Reference:
+- `OPENAI_API_KEY`
+- `GEMINI_API_KEY`
+- `ANTHROPIC_API_KEY`
+
+---
+
+## Architecture
+
+### Input
+```text
+src/ractogateway/
+```
+
+### Output
+```text
+src/ractogateway/
+|-- __init__.py
+|-- _models/
+|   |-- chat.py
+|   |-- stream.py
+|   `-- embedding.py
+|-- prompts/
+|   `-- engine.py
+|-- tools/
+|   `-- registry.py
+|-- adapters/
+|   |-- base.py
+|   |-- openai_kit.py
+|   |-- google_kit.py
+|   `-- anthropic_kit.py
+|-- gateway/
+|   `-- runner.py
+|-- openai_developer_kit/
+|   `-- kit.py
+|-- google_developer_kit/
+|   `-- kit.py
+|-- anthropic_developer_kit/
+|   `-- kit.py
+|-- rag/
+|   |-- pipeline.py
+|   |-- readers/
+|   |-- chunkers/
+|   |-- embedders/
+|   |-- processors/
+|   `-- stores/
+`-- finetune/
+    |-- dataset.py
+    |-- openai_tuner.py
+    |-- gemini_tuner.py
+    `-- anthropic_tuner.py
+```
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please open an issue first to discuss what you'd like to change.
-
+### Input
 ```bash
-# Clone and install in development mode
 git clone https://github.com/IAMPathak2702/RactoGateway.git
 cd RactoGateway
 pip install -e ".[dev]"
 
-# Run tests
 pytest
-
-# Lint and format
 ruff check src/ tests/
 ruff format src/ tests/
-
-# Type checking
 mypy src/
+```
+
+### Output (example)
+```text
+============================= test session starts =============================
+collected N items
+...
+============================== N passed in 0.XXs ==============================
+
+All checks passed!
 ```
 
 ---
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
+### Input
+```text
+License type
+```
 
-Copyright 2026 Ved Prakash Pathak
+### Output
+```text
+Apache License 2.0
+```
+
+See `LICENSE` for details.
 
 ---
 
 ## Author
 
-### Ved Prakash Pathak
+### Input
+```text
+Project maintainer
+```
 
-- GitHub: [@IAMPathak2702](https://github.com/IAMPathak2702)
-- Email: [vp.ved.vpp@gmail.com](mailto:vp.ved.vpp@gmail.com)
+### Output
+```text
+Ved Prakash Pathak
+GitHub: @IAMPathak2702
+Email: vp.ved.vpp@gmail.com
+```
