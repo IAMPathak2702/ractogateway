@@ -515,7 +515,7 @@ mypy src/
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
-Copyright 2025 Ved Prakash Pathak
+Copyright 2026 Ved Prakash Pathak
 
 ---
 
