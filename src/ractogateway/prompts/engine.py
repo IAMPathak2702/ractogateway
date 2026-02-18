@@ -11,8 +11,11 @@ The ``RactoPrompt`` model enforces the RACTO principle:
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import textwrap
+from pathlib import Path
 from typing import Any, Union
 
 from pydantic import BaseModel, Field, model_validator
@@ -24,6 +27,242 @@ from pydantic import BaseModel, Field, model_validator
 
 class _Unset:
     """Internal sentinel — distinguishes 'user passed None' from 'not set'."""
+
+
+# ---------------------------------------------------------------------------
+# File attachment support
+# ---------------------------------------------------------------------------
+
+#: MIME types treated as images by every provider.
+_IMAGE_MIMES: frozenset[str] = frozenset(
+    {"image/jpeg", "image/png", "image/gif", "image/webp"}
+)
+
+
+class RactoFile:
+    """A file attachment that can be passed to :meth:`RactoPrompt.to_messages`.
+
+    Create from a file path (MIME type is auto-detected) or directly from
+    raw bytes with an explicit MIME type.
+
+    Parameters
+    ----------
+    data:
+        Raw bytes of the file.
+    mime_type:
+        MIME type string, e.g. ``"image/jpeg"`` or ``"application/pdf"``.
+    name:
+        Optional filename hint used for display / debugging.
+
+    Examples
+    --------
+    >>> # From a file path
+    >>> img = RactoFile.from_path("/tmp/photo.jpg")
+
+    >>> # From bytes
+    >>> img = RactoFile.from_bytes(open("photo.jpg", "rb").read(), "image/jpeg")
+    """
+
+    def __init__(self, data: bytes, mime_type: str, name: str = "") -> None:
+        self.data = data
+        self.mime_type = mime_type
+        self.name = name
+
+    # ------------------------------------------------------------------
+    # Constructors
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_path(cls, path: str | Path) -> "RactoFile":
+        """Load a file from *path* and auto-detect its MIME type.
+
+        Parameters
+        ----------
+        path:
+            Absolute or relative path to the file on disk.
+
+        Raises
+        ------
+        FileNotFoundError
+            If *path* does not exist.
+        """
+        p = Path(path)
+        mime_type, _ = mimetypes.guess_type(str(p))
+        if mime_type is None:
+            mime_type = "application/octet-stream"
+        return cls(data=p.read_bytes(), mime_type=mime_type, name=p.name)
+
+    @classmethod
+    def from_bytes(
+        cls, data: bytes, mime_type: str, name: str = ""
+    ) -> "RactoFile":
+        """Create a :class:`RactoFile` directly from *data* bytes.
+
+        Parameters
+        ----------
+        data:
+            Raw file bytes.
+        mime_type:
+            MIME type of the data, e.g. ``"image/png"``.
+        name:
+            Optional filename string (no file I/O is performed).
+        """
+        return cls(data=data, mime_type=mime_type, name=name)
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def base64_data(self) -> str:
+        """Return file bytes encoded as a base-64 ASCII string."""
+        return base64.b64encode(self.data).decode("ascii")
+
+    @property
+    def is_image(self) -> bool:
+        """True when the MIME type is a supported image type."""
+        return self.mime_type in _IMAGE_MIMES
+
+    @property
+    def is_pdf(self) -> bool:
+        return self.mime_type == "application/pdf"
+
+    @property
+    def is_text(self) -> bool:
+        return self.mime_type.startswith("text/")
+
+    def __repr__(self) -> str:
+        label = self.name or "<unnamed>"
+        return f"RactoFile(name={label!r}, mime_type={self.mime_type!r}, bytes={len(self.data)})"
+
+
+# ---------------------------------------------------------------------------
+# Provider-specific content-block builders
+# ---------------------------------------------------------------------------
+
+
+def _build_openai_content(
+    user_message: str,
+    attachments: list[RactoFile],
+) -> "str | list[dict[str, Any]]":
+    """Return OpenAI-compatible user content with optional file attachments.
+
+    Images become ``image_url`` blocks using an inline ``data:`` URI.
+    Text files are embedded as ``text`` blocks.
+    All other file types are embedded as a ``data:`` URI so vision-capable
+    models can still attempt to process them.
+    """
+    if not attachments:
+        return user_message
+
+    parts: list[dict[str, Any]] = []
+    for f in attachments:
+        if f.is_image or not (f.is_text or f.is_pdf):
+            # Images *and* any binary non-text file → data URI image_url block.
+            parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{f.mime_type};base64,{f.base64_data}"
+                    },
+                }
+            )
+        else:
+            # Plain-text / unknown text: decode and embed as a text block.
+            parts.append(
+                {
+                    "type": "text",
+                    "text": f.data.decode("utf-8", errors="replace"),
+                }
+            )
+    parts.append({"type": "text", "text": user_message})
+    return parts
+
+
+def _build_anthropic_content(
+    user_message: str,
+    attachments: list[RactoFile],
+) -> "str | list[dict[str, Any]]":
+    """Return Anthropic-compatible user content with optional file attachments.
+
+    * Images  → ``image`` content blocks (base-64 source).
+    * PDFs    → ``document`` content blocks (base-64 source).
+    * Text    → ``text`` content blocks (decoded string).
+    * Other   → ``text`` block containing the base-64 payload with a label.
+    """
+    if not attachments:
+        return user_message
+
+    parts: list[dict[str, Any]] = []
+    for f in attachments:
+        if f.is_image:
+            parts.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": f.mime_type,
+                        "data": f.base64_data,
+                    },
+                }
+            )
+        elif f.is_pdf:
+            parts.append(
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": f.base64_data,
+                    },
+                }
+            )
+        elif f.is_text:
+            parts.append(
+                {"type": "text", "text": f.data.decode("utf-8", errors="replace")}
+            )
+        else:
+            label = f.name or "attachment"
+            parts.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"[File: {label} ({f.mime_type}) — "
+                        f"base64 encoded]\n{f.base64_data}"
+                    ),
+                }
+            )
+    parts.append({"type": "text", "text": user_message})
+    return parts
+
+
+def _build_google_content(
+    user_message: str,
+    attachments: list[RactoFile],
+) -> "str | list[dict[str, Any]]":
+    """Return Google Gemini-compatible user content with optional file attachments.
+
+    Text files become ``text`` parts; all other files become ``inline_data``
+    parts with base-64 encoded bytes and their MIME type.
+    """
+    if not attachments:
+        return user_message
+
+    parts: list[dict[str, Any]] = []
+    for f in attachments:
+        if f.is_text:
+            parts.append({"text": f.data.decode("utf-8", errors="replace")})
+        else:
+            parts.append(
+                {
+                    "inline_data": {
+                        "mime_type": f.mime_type,
+                        "data": f.base64_data,
+                    }
+                }
+            )
+    parts.append({"text": user_message})
+    return parts
 
 
 # ---------------------------------------------------------------------------
@@ -243,29 +482,47 @@ class RactoPrompt(BaseModel):
         self,
         user_message: str,
         *,
+        attachments: list[RactoFile] | None = None,
         provider: str = "generic",
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         """Return a ready-to-send message list for a given LLM provider.
 
         Parameters
         ----------
         user_message:
             The end-user's query or input.
+        attachments:
+            Optional list of :class:`RactoFile` objects to send alongside
+            the text message.  Accepted inputs per file:
+
+            * **File path** — use :meth:`RactoFile.from_path`::
+
+                RactoFile.from_path("/tmp/diagram.png")
+
+            * **Raw bytes** — use :meth:`RactoFile.from_bytes`::
+
+                RactoFile.from_bytes(img_bytes, "image/png")
+
+            Each file is re-encoded into the content-block schema expected
+            by the target provider (``image_url`` for OpenAI, ``image`` /
+            ``document`` for Anthropic, ``inline_data`` for Google).
         provider:
             One of ``"openai"``, ``"anthropic"``, ``"google"``, or
-            ``"generic"``.  Controls the system-role key name.
+            ``"generic"``.  Controls the system-role key name and the
+            content-block format used for attachments.
 
         Returns
         -------
-        list[dict[str, str]]
+        list[dict[str, Any]]
             A list of message dicts suitable for the provider's API.
         """
         system_prompt = self.compile()
+        files = attachments or []
 
         if provider in ("openai", "generic"):
             return [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
+                {"role": "user", "content": _build_openai_content(user_message, files)},
             ]
 
         if provider == "anthropic":
@@ -274,7 +531,7 @@ class RactoPrompt(BaseModel):
             # will unpack it.
             return [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
+                {"role": "user", "content": _build_anthropic_content(user_message, files)},
             ]
 
         if provider == "google":
@@ -282,7 +539,7 @@ class RactoPrompt(BaseModel):
             # The adapter will split this; we use a marker role.
             return [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
+                {"role": "user", "content": _build_google_content(user_message, files)},
             ]
 
         raise ValueError(

@@ -321,6 +321,249 @@ prompt = RactoPrompt(
 
 ---
 
+## Multimodal Attachments — Images & Files
+
+`RactoFile` lets you attach images, PDFs, plain-text files, and any other binary file to a `to_messages()` call.
+The attachment is **automatically re-encoded** into the content-block schema expected by the target provider — you never write raw `image_url`, `inline_data`, or `source` dicts by hand.
+
+### Creating a `RactoFile`
+
+#### From a file path — MIME type is auto-detected
+
+```python
+from ractogateway.prompts.engine import RactoFile
+
+img = RactoFile.from_path("/path/to/photo.jpg")       # image/jpeg
+doc = RactoFile.from_path("/path/to/report.pdf")      # application/pdf
+txt = RactoFile.from_path("/path/to/notes.txt")       # text/plain
+```
+
+#### From raw bytes — MIME type supplied explicitly
+
+```python
+# From an open file handle
+with open("chart.png", "rb") as fh:
+    img = RactoFile.from_bytes(fh.read(), "image/png", name="chart.png")
+
+# From bytes already in memory (e.g. downloaded with requests)
+import requests
+resp = requests.get("https://example.com/diagram.png")
+img = RactoFile.from_bytes(resp.content, "image/png", name="diagram.png")
+```
+
+### Passing Attachments to `to_messages()`
+
+```python
+messages = prompt.to_messages(
+    "What does this chart show?",
+    attachments=[img],          # list[RactoFile], any length
+    provider="openai",          # "openai" | "anthropic" | "google" | "generic"
+)
+```
+
+You can mix multiple files of different types in the same call:
+
+```python
+messages = prompt.to_messages(
+    "Summarise the attached report and explain the diagram.",
+    attachments=[
+        RactoFile.from_path("report.pdf"),
+        RactoFile.from_path("diagram.png"),
+    ],
+    provider="anthropic",
+)
+```
+
+### Provider Content-Block Output
+
+Each provider receives a different content-block shape. `to_messages()` handles the translation transparently.
+
+#### OpenAI / Generic
+
+Images and binary files become **`image_url`** blocks with an inline `data:` URI.
+Text files become **`text`** blocks.
+
+```python
+# prompt.to_messages("Describe the image.", attachments=[jpeg_file], provider="openai")
+[
+    {"role": "system", "content": "<compiled RACTO system prompt>"},
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": "data:image/jpeg;base64,/9j/4AAQSkZJRgAB..."
+                }
+            },
+            {"type": "text", "text": "Describe the image."}
+        ]
+    }
+]
+```
+
+#### Anthropic Claude
+
+- Images → **`image`** content block with `base64` source
+- PDFs → **`document`** content block with `base64` source
+- Text files → **`text`** content block (decoded UTF-8)
+- Other binary → **`text`** block with a labelled base-64 payload
+
+```python
+# prompt.to_messages("Summarise.", attachments=[pdf_file], provider="anthropic")
+[
+    {"role": "system", "content": "<compiled RACTO system prompt>"},
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": "JVBERi0xLjQK..."
+                }
+            },
+            {"type": "text", "text": "Summarise."}
+        ]
+    }
+]
+```
+
+#### Google Gemini
+
+- Text files → **`text`** parts (decoded UTF-8)
+- All other files → **`inline_data`** parts with `mime_type` and base-64 `data`
+
+```python
+# prompt.to_messages("What is in this image?", attachments=[png_file], provider="google")
+[
+    {"role": "system", "content": "<compiled RACTO system prompt>"},
+    {
+        "role": "user",
+        "content": [
+            {
+                "inline_data": {
+                    "mime_type": "image/png",
+                    "data": "iVBORw0KGgoAAAANS..."
+                }
+            },
+            {"text": "What is in this image?"}
+        ]
+    }
+]
+```
+
+### Supported File Types
+
+| File type | MIME type | OpenAI | Anthropic | Google |
+| --- | --- | :---: | :---: | :---: |
+| JPEG image | `image/jpeg` | `image_url` block | `image` block | `inline_data` part |
+| PNG image | `image/png` | `image_url` block | `image` block | `inline_data` part |
+| GIF image | `image/gif` | `image_url` block | `image` block | `inline_data` part |
+| WebP image | `image/webp` | `image_url` block | `image` block | `inline_data` part |
+| PDF document | `application/pdf` | `image_url` block | `document` block | `inline_data` part |
+| Plain text | `text/plain` | `text` block | `text` block | `text` part |
+| Any other | `*/*` | `image_url` block (data URI) | labelled `text` block | `inline_data` part |
+
+> MIME type detection is fully automatic when using `RactoFile.from_path()`. When using `RactoFile.from_bytes()`, supply the MIME type explicitly.
+
+### Full End-to-End Example — OpenAI Vision
+
+```python
+from ractogateway import RactoPrompt
+from ractogateway.prompts.engine import RactoFile
+from ractogateway import openai_developer_kit as opd
+
+prompt = RactoPrompt(
+    role="You are a data analyst specialising in chart interpretation.",
+    aim="Describe what the attached chart shows and extract the key insights.",
+    constraints=[
+        "Only describe what is visible in the image.",
+        "Never invent data points that are not in the chart.",
+    ],
+    tone="Clear and concise",
+    output_format="text",
+)
+
+kit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
+
+config = opd.ChatConfig(
+    user_message="What does this chart show?",
+    attachments=[RactoFile.from_path("sales_q4.png")],
+)
+
+response = kit.chat(config)
+print(response.content)
+# "The bar chart shows Q4 2024 sales figures across four regions..."
+```
+
+### Full End-to-End Example — Anthropic (Image + PDF)
+
+```python
+from ractogateway import RactoPrompt
+from ractogateway.prompts.engine import RactoFile
+from ractogateway import anthropic_developer_kit as anth
+
+prompt = RactoPrompt(
+    role="You are a financial analyst.",
+    aim="Summarise the key financial metrics from the attached report and diagram.",
+    constraints=["Only extract facts present in the documents.", "Be concise."],
+    tone="Professional",
+    output_format="text",
+)
+
+kit = anth.AnthropicDeveloperKit(model="claude-sonnet-4-5-20250929", default_prompt=prompt)
+
+config = anth.ChatConfig(
+    user_message="Summarise the attached report and explain the chart.",
+    attachments=[
+        RactoFile.from_path("annual_report.pdf"),
+        RactoFile.from_path("revenue_chart.png"),
+    ],
+)
+
+response = kit.chat(config)
+print(response.content)
+```
+
+### Full End-to-End Example — From Bytes (e.g. API download)
+
+```python
+import requests
+from ractogateway.prompts.engine import RactoFile
+
+# Fetch an image from an external URL
+resp = requests.get("https://example.com/chart.png")
+chart = RactoFile.from_bytes(resp.content, "image/png", name="chart.png")
+
+# Or read from a file handle
+with open("report.pdf", "rb") as fh:
+    pdf = RactoFile.from_bytes(fh.read(), "application/pdf", name="report.pdf")
+
+messages = prompt.to_messages(
+    "Analyse this chart and report.",
+    attachments=[chart, pdf],
+    provider="anthropic",
+)
+```
+
+### `RactoFile` API Reference
+
+| Member | Description |
+| --- | --- |
+| `RactoFile.from_path(path)` | Load from disk; MIME type auto-detected via `mimetypes`. Raises `FileNotFoundError` if path is missing. |
+| `RactoFile.from_bytes(data, mime_type, name="")` | Wrap raw bytes; MIME type must be supplied explicitly. |
+| `.data` | `bytes` — raw file content |
+| `.mime_type` | `str` — MIME type string, e.g. `"image/png"` |
+| `.name` | `str` — filename hint (empty string if not provided) |
+| `.base64_data` | `str` — file bytes encoded as a base-64 ASCII string |
+| `.is_image` | `bool` — `True` for `image/jpeg`, `image/png`, `image/gif`, `image/webp` |
+| `.is_pdf` | `bool` — `True` for `application/pdf` |
+| `.is_text` | `bool` — `True` for any `text/*` MIME type |
+
+---
+
 ## Tool Calling
 
 Define tools as Python functions — never write nested JSON dicts.
@@ -444,7 +687,7 @@ src/ractogateway/
 │   └── embedding.py                     #   EmbeddingConfig, EmbeddingResponse, EmbeddingVector
 │
 ├── prompts/                             # RACTO Prompt Engine
-│   └── engine.py                        #   RactoPrompt model + compile()
+│   └── engine.py                        #   RactoPrompt, RactoFile, compile(), to_messages()
 │
 ├── tools/                               # Tool Registry
 │   └── registry.py                      #   @tool decorator, ToolRegistry, ToolSchema
