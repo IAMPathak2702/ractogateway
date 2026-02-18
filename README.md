@@ -413,11 +413,9 @@ def count_up(n):
 for num in count_up(5):
     print(num)  # 0, 1, 2, 3, 4
 ```
-
 Finish reason : FinishReason.STOP
 Tokens used   : {"prompt_tokens": 55, "completion_tokens": 120, "total_tokens": 175}
 Full response : A generator in Python is a special function that yields values one at a time...
-```
 
 ### `StreamChunk` Field Reference
 
