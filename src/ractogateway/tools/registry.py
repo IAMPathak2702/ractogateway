@@ -9,15 +9,16 @@ into the provider-specific format it needs.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, get_args, get_origin, get_type_hints
+from typing import Any, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, Field
-
 
 # ---------------------------------------------------------------------------
 # Canonical parameter / tool schema models
 # ---------------------------------------------------------------------------
+
 
 class ParamSchema(BaseModel):
     """Schema for a single function parameter."""
@@ -125,6 +126,7 @@ def _resolve_json_type(annotation: Any) -> tuple[str, list[str] | None]:
 # Function introspection → ToolSchema
 # ---------------------------------------------------------------------------
 
+
 def _schema_from_function(fn: Callable[..., Any]) -> ToolSchema:
     """Introspect a Python function and build a ``ToolSchema``."""
     sig = inspect.signature(fn)
@@ -203,6 +205,7 @@ def _schema_from_model(model: type[BaseModel]) -> ToolSchema:
 # Docstring param parsing (lightweight)
 # ---------------------------------------------------------------------------
 
+
 def _parse_param_docs(docstring: str) -> dict[str, str]:
     """Extract parameter descriptions from a docstring.
 
@@ -248,6 +251,7 @@ def _parse_param_docs(docstring: str) -> dict[str, str]:
 # @tool decorator
 # ---------------------------------------------------------------------------
 
+
 def tool(
     fn: Callable[..., Any] | None = None,
     *,
@@ -282,6 +286,7 @@ def tool(
 # ---------------------------------------------------------------------------
 # ToolRegistry
 # ---------------------------------------------------------------------------
+
 
 class ToolRegistry:
     """A registry that collects tools and exposes them as canonical schemas.
@@ -351,7 +356,7 @@ class ToolRegistry:
         if target is not None:
             return _do_register(target)
         # Decorator with arguments: @registry.register(name="x")
-        return _do_register  # type: ignore[return-value]
+        return _do_register
 
     # ------------------------------------------------------------------
     # Access

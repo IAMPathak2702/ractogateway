@@ -128,8 +128,12 @@ select = [
     "PL",   # pylint
 ]
 ignore = [
-    "S101",   # assert used in tests is fine
+    "S101",    # assert used in tests is fine
     "PLR0913", # too many arguments — unavoidable in SDK design
+    "TC001",   # runtime imports needed by Pydantic model fields
+    "TC002",   # runtime third-party imports needed by Pydantic model fields
+    "TC003",   # runtime stdlib imports needed by Pydantic model fields
+    "PLC0415", # intentional lazy provider imports inside _require_xxx() functions
 ]
 
 [tool.ruff.lint.isort]
@@ -137,6 +141,9 @@ known-first-party = ["ractogateway"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "PLR2004"]
+"src/ractogateway/prompts/engine.py" = ["E501"]               # guardrail strings intentionally verbose
+"src/ractogateway/tools/registry.py" = ["PLR2004"]            # magic length constant is self-documenting
+"src/ractogateway/anthropic_developer_kit/kit.py" = ["PLR0911"] # streaming state machine needs >6 return paths
 
 [tool.mypy]
 python_version = "3.10"

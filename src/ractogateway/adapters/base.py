@@ -16,12 +16,12 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ractogateway.prompts.engine import RactoPrompt
-from ractogateway.tools.registry import ToolRegistry, ToolSchema
-
+from ractogateway.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Standardised response model
 # ---------------------------------------------------------------------------
+
 
 class FinishReason(str, Enum):
     """Why the model stopped generating."""
@@ -106,6 +106,7 @@ def try_parse_json(text: str) -> dict[str, Any] | list[Any] | None:
 # ---------------------------------------------------------------------------
 # Abstract base adapter
 # ---------------------------------------------------------------------------
+
 
 class BaseLLMAdapter(ABC):
     """Abstract base class that every provider adapter must implement.

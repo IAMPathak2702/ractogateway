@@ -17,10 +17,10 @@ from typing import Any, Union
 
 from pydantic import BaseModel, Field, model_validator
 
-
 # ---------------------------------------------------------------------------
 # Sentinel for "no default"
 # ---------------------------------------------------------------------------
+
 
 class _Unset:
     """Internal sentinel — distinguishes 'user passed None' from 'not set'."""
@@ -29,6 +29,7 @@ class _Unset:
 # ---------------------------------------------------------------------------
 # Output format helpers
 # ---------------------------------------------------------------------------
+
 
 def _schema_from_model(model: type[BaseModel]) -> dict[str, Any]:
     """Extract a clean JSON Schema dict from a Pydantic v2 model."""
@@ -74,6 +75,7 @@ def _render_output_block(output_format: str | type[BaseModel]) -> str:
 # ---------------------------------------------------------------------------
 # Core model
 # ---------------------------------------------------------------------------
+
 
 class RactoPrompt(BaseModel):
     """A strictly validated RACTO prompt definition.
@@ -138,8 +140,7 @@ class RactoPrompt(BaseModel):
     examples: list[dict[str, str]] | None = Field(
         default=None,
         description=(
-            "Optional few-shot examples. Each dict should have "
-            "'input' and 'output' keys."
+            "Optional few-shot examples. Each dict should have 'input' and 'output' keys."
         ),
     )
     anti_hallucination: bool = Field(
@@ -155,17 +156,16 @@ class RactoPrompt(BaseModel):
     # ------------------------------------------------------------------
 
     @model_validator(mode="after")
-    def _validate_constraints_not_empty_strings(self) -> "RactoPrompt":
+    def _validate_constraints_not_empty_strings(self) -> RactoPrompt:
         for idx, c in enumerate(self.constraints):
             if not c.strip():
                 raise ValueError(
-                    f"constraints[{idx}] is blank. Every constraint must be "
-                    "a non-empty string."
+                    f"constraints[{idx}] is blank. Every constraint must be a non-empty string."
                 )
         return self
 
     @model_validator(mode="after")
-    def _validate_examples_shape(self) -> "RactoPrompt":
+    def _validate_examples_shape(self) -> RactoPrompt:
         if self.examples is not None:
             for idx, ex in enumerate(self.examples):
                 if "input" not in ex or "output" not in ex:
@@ -203,9 +203,7 @@ class RactoPrompt(BaseModel):
             sections.append(f"[CONTEXT]\n{self.context}")
 
         # --- CONSTRAINTS ---
-        constraint_lines = "\n".join(
-            f"- {c}" for c in self.constraints
-        )
+        constraint_lines = "\n".join(f"- {c}" for c in self.constraints)
         sections.append(f"[CONSTRAINTS]\n{constraint_lines}")
 
         # --- TONE ---
@@ -220,9 +218,7 @@ class RactoPrompt(BaseModel):
             example_parts: list[str] = []
             for i, ex in enumerate(self.examples, start=1):
                 example_parts.append(
-                    f"Example {i}:\n"
-                    f"  Input:  {ex['input']}\n"
-                    f"  Output: {ex['output']}"
+                    f"Example {i}:\n  Input:  {ex['input']}\n  Output: {ex['output']}"
                 )
             sections.append("[EXAMPLES]\n" + "\n\n".join(example_parts))
 

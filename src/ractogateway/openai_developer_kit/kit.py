@@ -18,8 +18,6 @@ import os
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
-from pydantic import BaseModel
-
 from ractogateway._models.chat import ChatConfig
 from ractogateway._models.embedding import EmbeddingConfig, EmbeddingResponse, EmbeddingVector
 from ractogateway._models.stream import StreamChunk, StreamDelta
@@ -73,7 +71,9 @@ class OpenAIDeveloperKit:
         self._embedding_model = embedding_model
         self._default_prompt = default_prompt
         self._adapter = OpenAILLMKit(
-            model=model, api_key=api_key, base_url=base_url,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
         )
 
     # ------------------------------------------------------------------
@@ -108,8 +108,7 @@ class OpenAIDeveloperKit:
         prompt = config.prompt or self._default_prompt
         if prompt is None:
             raise ValueError(
-                "No prompt in ChatConfig and no default_prompt on the kit. "
-                "Set one of them."
+                "No prompt in ChatConfig and no default_prompt on the kit. Set one of them."
             )
         return prompt
 
@@ -121,7 +120,8 @@ class OpenAIDeveloperKit:
         """Synchronous chat completion."""
         prompt = self._resolve_prompt(config)
         response = self._adapter.run(
-            prompt, config.user_message,
+            prompt,
+            config.user_message,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -133,7 +133,8 @@ class OpenAIDeveloperKit:
         """Async chat completion."""
         prompt = self._resolve_prompt(config)
         response = await self._adapter.arun(
-            prompt, config.user_message,
+            prompt,
+            config.user_message,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -158,7 +159,8 @@ class OpenAIDeveloperKit:
         prompt = self._resolve_prompt(config)
         client = self._sync_client()
         request = self._adapter._build_request(
-            prompt, config.user_message,
+            prompt,
+            config.user_message,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -173,7 +175,9 @@ class OpenAIDeveloperKit:
         with client.chat.completions.create(**request) as stream_resp:
             for event in stream_resp:
                 chunk = self._process_openai_event(
-                    event, accumulated, tc_acc,
+                    event,
+                    accumulated,
+                    tc_acc,
                 )
                 if chunk is not None:
                     accumulated = chunk.accumulated_text
@@ -184,7 +188,8 @@ class OpenAIDeveloperKit:
         prompt = self._resolve_prompt(config)
         client = self._async_client()
         request = self._adapter._build_request(
-            prompt, config.user_message,
+            prompt,
+            config.user_message,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -199,7 +204,9 @@ class OpenAIDeveloperKit:
         async with await client.chat.completions.create(**request) as stream_resp:
             async for event in stream_resp:
                 chunk = self._process_openai_event(
-                    event, accumulated, tc_acc,
+                    event,
+                    accumulated,
+                    tc_acc,
                 )
                 if chunk is not None:
                     accumulated = chunk.accumulated_text
@@ -270,9 +277,7 @@ class OpenAIDeveloperKit:
                     text=text,
                     tool_call_id=tc_acc[idx]["id"],
                     tool_call_name=tc_acc[idx]["name"],
-                    tool_call_args_fragment=(
-                        tc.function.arguments if tc.function else None
-                    ),
+                    tool_call_args_fragment=(tc.function.arguments if tc.function else None),
                 )
 
         if choice.finish_reason is not None:
@@ -306,7 +311,9 @@ class OpenAIDeveloperKit:
         return _normalise_openai_embedding(raw, config.texts, model)
 
     async def _do_aembed(
-        self, client: Any, config: EmbeddingConfig,
+        self,
+        client: Any,
+        config: EmbeddingConfig,
     ) -> EmbeddingResponse:
         model = config.model or self._embedding_model
         kw: dict[str, Any] = {}
@@ -320,6 +327,7 @@ class OpenAIDeveloperKit:
 # ======================================================================
 # Module-level helpers (shared, no state)
 # ======================================================================
+
 
 def _flush_tool_calls(acc: dict[int, dict[str, Any]]) -> list[ToolCallResult]:
     results: list[ToolCallResult] = []
@@ -335,7 +343,9 @@ def _flush_tool_calls(acc: dict[int, dict[str, Any]]) -> list[ToolCallResult]:
 
 
 def _normalise_openai_embedding(
-    raw: Any, texts: list[str], model: str,
+    raw: Any,
+    texts: list[str],
+    model: str,
 ) -> EmbeddingResponse:
     vectors = [
         EmbeddingVector(
@@ -359,9 +369,7 @@ def _maybe_validate(response: LLMResponse, config: ChatConfig) -> LLMResponse:
         try:
             validated = config.response_model.model_validate(response.parsed)
             response.parsed = validated.model_dump()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             warning = f"[RactoGateway] response_model validation failed: {exc}"
-            response.content = (
-                f"{response.content}\n\n{warning}" if response.content else warning
-            )
+            response.content = f"{response.content}\n\n{warning}" if response.content else warning
     return response

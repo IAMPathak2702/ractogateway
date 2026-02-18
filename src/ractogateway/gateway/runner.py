@@ -92,9 +92,7 @@ class Gateway:
         """
         effective_prompt = prompt or self.default_prompt
         if effective_prompt is None:
-            raise ValueError(
-                "No prompt provided and no default_prompt configured on the Gateway."
-            )
+            raise ValueError("No prompt provided and no default_prompt configured on the Gateway.")
 
         effective_tools = tools or self.tools
 
@@ -126,9 +124,7 @@ class Gateway:
         """Async variant of ``run()``."""
         effective_prompt = prompt or self.default_prompt
         if effective_prompt is None:
-            raise ValueError(
-                "No prompt provided and no default_prompt configured on the Gateway."
-            )
+            raise ValueError("No prompt provided and no default_prompt configured on the Gateway.")
 
         effective_tools = tools or self.tools
 
@@ -166,7 +162,7 @@ class Gateway:
             if isinstance(response.parsed, dict):
                 validated = model.model_validate(response.parsed)
                 response.parsed = validated.model_dump()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # Don't crash — surface the validation issue but keep raw data.
             warning = f"[RactoGateway] response_model validation failed: {exc}"
             if response.content:

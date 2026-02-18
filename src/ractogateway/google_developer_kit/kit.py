@@ -17,8 +17,6 @@ import os
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
-from pydantic import BaseModel
-
 from ractogateway._models.chat import ChatConfig
 from ractogateway._models.embedding import EmbeddingConfig, EmbeddingResponse, EmbeddingVector
 from ractogateway._models.stream import StreamChunk, StreamDelta
@@ -82,8 +80,7 @@ class GoogleDeveloperKit:
         prompt = config.prompt or self._default_prompt
         if prompt is None:
             raise ValueError(
-                "No prompt in ChatConfig and no default_prompt on the kit. "
-                "Set one of them."
+                "No prompt in ChatConfig and no default_prompt on the kit. Set one of them."
             )
         return prompt
 
@@ -95,7 +92,8 @@ class GoogleDeveloperKit:
         """Synchronous chat completion."""
         prompt = self._resolve_prompt(config)
         response = self._adapter.run(
-            prompt, config.user_message,
+            prompt,
+            config.user_message,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -107,7 +105,8 @@ class GoogleDeveloperKit:
         """Async chat completion."""
         prompt = self._resolve_prompt(config)
         response = await self._adapter.arun(
-            prompt, config.user_message,
+            prompt,
+            config.user_message,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -151,7 +150,9 @@ class GoogleDeveloperKit:
             ),
         ):
             chunk = self._process_gemini_event(
-                event, accumulated, tool_calls,
+                event,
+                accumulated,
+                tool_calls,
             )
             accumulated = chunk.accumulated_text
             yield chunk
@@ -182,7 +183,9 @@ class GoogleDeveloperKit:
             ),
         ):
             chunk = self._process_gemini_event(
-                event, accumulated, tool_calls,
+                event,
+                accumulated,
+                tool_calls,
             )
             accumulated = chunk.accumulated_text
             yield chunk
@@ -200,7 +203,8 @@ class GoogleDeveloperKit:
             raw = client.models.embed_content(model=model, contents=text)
             vectors.append(
                 EmbeddingVector(
-                    index=i, text=text,
+                    index=i,
+                    text=text,
                     embedding=raw.embeddings[0].values,
                 ),
             )
@@ -213,11 +217,13 @@ class GoogleDeveloperKit:
         vectors: list[EmbeddingVector] = []
         for i, text in enumerate(config.texts):
             raw = await client.aio.models.embed_content(
-                model=model, contents=text,
+                model=model,
+                contents=text,
             )
             vectors.append(
                 EmbeddingVector(
-                    index=i, text=text,
+                    index=i,
+                    text=text,
                     embedding=raw.embeddings[0].values,
                 ),
             )
@@ -252,10 +258,7 @@ class GoogleDeveloperKit:
                         )
 
         accumulated += text_delta
-        is_last = bool(
-            event.candidates
-            and event.candidates[0].finish_reason is not None
-        )
+        is_last = bool(event.candidates and event.candidates[0].finish_reason is not None)
 
         usage: dict[str, int] = {}
         if is_last and hasattr(event, "usage_metadata") and event.usage_metadata:
@@ -266,11 +269,7 @@ class GoogleDeveloperKit:
                 "total_tokens": getattr(um, "total_token_count", 0) or 0,
             }
 
-        finish = (
-            (FinishReason.TOOL_CALL if tool_calls else FinishReason.STOP)
-            if is_last
-            else None
-        )
+        finish = (FinishReason.TOOL_CALL if tool_calls else FinishReason.STOP) if is_last else None
 
         return StreamChunk(
             delta=StreamDelta(text=text_delta),
@@ -287,14 +286,13 @@ class GoogleDeveloperKit:
 # Module-level helpers
 # ======================================================================
 
+
 def _maybe_validate(response: LLMResponse, config: ChatConfig) -> LLMResponse:
     if config.response_model is not None and isinstance(response.parsed, dict):
         try:
             validated = config.response_model.model_validate(response.parsed)
             response.parsed = validated.model_dump()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             warning = f"[RactoGateway] response_model validation failed: {exc}"
-            response.content = (
-                f"{response.content}\n\n{warning}" if response.content else warning
-            )
+            response.content = f"{response.content}\n\n{warning}" if response.content else warning
     return response

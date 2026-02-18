@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json as _json
 import os
 from typing import Any
 
@@ -18,7 +17,7 @@ from ractogateway.tools.registry import ToolRegistry
 
 def _require_anthropic() -> Any:
     try:
-        import anthropic  # noqa: WPS433
+        import anthropic
     except ImportError as exc:
         raise ImportError(
             "The 'anthropic' package is required for AnthropicLLMKit. "
@@ -71,11 +70,13 @@ class AnthropicLLMKit(BaseLLMAdapter):
         """Convert registry schemas to Anthropic tool format."""
         tools: list[dict[str, Any]] = []
         for schema in registry.schemas:
-            tools.append({
-                "name": schema.name,
-                "description": schema.description,
-                "input_schema": schema.to_json_schema(),
-            })
+            tools.append(
+                {
+                    "name": schema.name,
+                    "description": schema.description,
+                    "input_schema": schema.to_json_schema(),
+                }
+            )
         return tools
 
     # ------------------------------------------------------------------
@@ -142,9 +143,12 @@ class AnthropicLLMKit(BaseLLMAdapter):
     ) -> LLMResponse:
         client = self._make_client()
         request = self._build_request(
-            prompt, user_message,
-            tools=tools, temperature=temperature,
-            max_tokens=max_tokens, **kwargs,
+            prompt,
+            user_message,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
         )
         response = client.messages.create(**request)
         return self._normalise(response)
@@ -161,9 +165,12 @@ class AnthropicLLMKit(BaseLLMAdapter):
     ) -> LLMResponse:
         client = self._make_client(async_=True)
         request = self._build_request(
-            prompt, user_message,
-            tools=tools, temperature=temperature,
-            max_tokens=max_tokens, **kwargs,
+            prompt,
+            user_message,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
         )
         response = await client.messages.create(**request)
         return self._normalise(response)

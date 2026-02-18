@@ -21,8 +21,6 @@ import os
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
-from pydantic import BaseModel
-
 from ractogateway._models.chat import ChatConfig
 from ractogateway._models.stream import StreamChunk, StreamDelta
 from ractogateway.adapters.anthropic_kit import AnthropicLLMKit
@@ -88,8 +86,7 @@ class AnthropicDeveloperKit:
         prompt = config.prompt or self._default_prompt
         if prompt is None:
             raise ValueError(
-                "No prompt in ChatConfig and no default_prompt on the kit. "
-                "Set one of them."
+                "No prompt in ChatConfig and no default_prompt on the kit. Set one of them."
             )
         return prompt
 
@@ -101,7 +98,8 @@ class AnthropicDeveloperKit:
         """Synchronous chat completion."""
         prompt = self._resolve_prompt(config)
         response = self._adapter.run(
-            prompt, config.user_message,
+            prompt,
+            config.user_message,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -113,7 +111,8 @@ class AnthropicDeveloperKit:
         """Async chat completion."""
         prompt = self._resolve_prompt(config)
         response = await self._adapter.arun(
-            prompt, config.user_message,
+            prompt,
+            config.user_message,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -138,7 +137,8 @@ class AnthropicDeveloperKit:
         prompt = self._resolve_prompt(config)
         client = self._sync_client()
         request = self._adapter._build_request(
-            prompt, config.user_message,
+            prompt,
+            config.user_message,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -153,7 +153,11 @@ class AnthropicDeveloperKit:
         with client.messages.stream(**request) as stream_resp:
             for event in stream_resp:
                 chunk = self._process_anthropic_event(
-                    event, accumulated, tc_acc, finish_reason, usage,
+                    event,
+                    accumulated,
+                    tc_acc,
+                    finish_reason,
+                    usage,
                 )
                 if chunk is not None:
                     accumulated = chunk.accumulated_text
@@ -168,7 +172,8 @@ class AnthropicDeveloperKit:
         prompt = self._resolve_prompt(config)
         client = self._async_client()
         request = self._adapter._build_request(
-            prompt, config.user_message,
+            prompt,
+            config.user_message,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -183,7 +188,11 @@ class AnthropicDeveloperKit:
         async with client.messages.stream(**request) as stream_resp:
             async for event in stream_resp:
                 chunk = self._process_anthropic_event(
-                    event, accumulated, tc_acc, finish_reason, usage,
+                    event,
+                    accumulated,
+                    tc_acc,
+                    finish_reason,
+                    usage,
                 )
                 if chunk is not None:
                     accumulated = chunk.accumulated_text
@@ -279,6 +288,7 @@ class AnthropicDeveloperKit:
 # Module-level helpers
 # ======================================================================
 
+
 def _flush_tool_calls(acc: dict[int, dict[str, Any]]) -> list[ToolCallResult]:
     results: list[ToolCallResult] = []
     for entry in acc.values():
@@ -297,9 +307,7 @@ def _maybe_validate(response: LLMResponse, config: ChatConfig) -> LLMResponse:
         try:
             validated = config.response_model.model_validate(response.parsed)
             response.parsed = validated.model_dump()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             warning = f"[RactoGateway] response_model validation failed: {exc}"
-            response.content = (
-                f"{response.content}\n\n{warning}" if response.content else warning
-            )
+            response.content = f"{response.content}\n\n{warning}" if response.content else warning
     return response

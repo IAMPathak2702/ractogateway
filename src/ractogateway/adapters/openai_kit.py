@@ -17,7 +17,7 @@ from ractogateway.tools.registry import ToolRegistry
 
 def _require_openai() -> Any:
     try:
-        import openai  # noqa: WPS433
+        import openai
     except ImportError as exc:
         raise ImportError(
             "The 'openai' package is required for OpenAILLMKit. "
@@ -76,14 +76,16 @@ class OpenAILLMKit(BaseLLMAdapter):
         """Convert registry schemas to OpenAI function-calling format."""
         tools: list[dict[str, Any]] = []
         for schema in registry.schemas:
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": schema.name,
-                    "description": schema.description,
-                    "parameters": schema.to_json_schema(),
-                },
-            })
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": schema.name,
+                        "description": schema.description,
+                        "parameters": schema.to_json_schema(),
+                    },
+                }
+            )
         return tools
 
     # ------------------------------------------------------------------
@@ -158,9 +160,12 @@ class OpenAILLMKit(BaseLLMAdapter):
     ) -> LLMResponse:
         client = self._make_client()
         request = self._build_request(
-            prompt, user_message,
-            tools=tools, temperature=temperature,
-            max_tokens=max_tokens, **kwargs,
+            prompt,
+            user_message,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
         )
         response = client.chat.completions.create(**request)
         return self._normalise(response)
@@ -177,9 +182,12 @@ class OpenAILLMKit(BaseLLMAdapter):
     ) -> LLMResponse:
         client = self._make_client(async_=True)
         request = self._build_request(
-            prompt, user_message,
-            tools=tools, temperature=temperature,
-            max_tokens=max_tokens, **kwargs,
+            prompt,
+            user_message,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
         )
         response = await client.chat.completions.create(**request)
         return self._normalise(response)

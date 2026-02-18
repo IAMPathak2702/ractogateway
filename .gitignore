@@ -200,3 +200,5 @@ dumb.rdb
 django.log.*
 
 NULL
+
+.claude

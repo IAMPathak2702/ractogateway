@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json as _json
 import os
 from typing import Any
 
@@ -18,7 +17,7 @@ from ractogateway.tools.registry import ToolRegistry
 
 def _require_genai() -> Any:
     try:
-        from google import genai  # noqa: WPS433
+        from google import genai
     except ImportError as exc:
         raise ImportError(
             "The 'google-genai' package is required for GoogleLLMKit. "
@@ -163,8 +162,10 @@ class GoogleLLMKit(BaseLLMAdapter):
 
         client = self._make_client()
         config = self._build_config(
-            tools=tools, temperature=temperature,
-            max_tokens=max_tokens, **kwargs,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
         )
         system_prompt = prompt.compile()
         response = client.models.generate_content(
@@ -191,8 +192,10 @@ class GoogleLLMKit(BaseLLMAdapter):
 
         client = self._make_client()
         config = self._build_config(
-            tools=tools, temperature=temperature,
-            max_tokens=max_tokens, **kwargs,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
         )
         system_prompt = prompt.compile()
         response = await client.aio.models.generate_content(
