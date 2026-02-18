@@ -1,0 +1,527 @@
+# RactoGateway
+
+**One Python package for all production-grade LLM solutions.**
+
+RactoGateway is a unified AI SDK that gives you a single, clean interface to OpenAI, Google Gemini, and Anthropic Claude — with built-in anti-hallucination prompting, strict Pydantic validation, streaming, tool calling, and embeddings. No more messy JSON dicts. No more provider lock-in. No more inconsistent response formats.
+
+[![PyPI version](https://img.shields.io/pypi/v/ractogateway.svg)](https://pypi.org/project/ractogateway/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Documentation](https://readthedocs.org/projects/ractogateway/badge/?version=latest)](https://ractogateway.readthedocs.io)
+
+---
+
+## Why RactoGateway?
+
+Every LLM provider has a different SDK, different request format, different response structure, and different tool-calling schema. Building production AI applications means writing glue code, parsing deeply nested objects, and manually stripping markdown fences from JSON responses.
+
+RactoGateway solves this by providing:
+
+- **RACTO Prompt Engine** — a structured prompt framework (Role, Aim, Constraints, Tone, Output) that compiles into optimized, anti-hallucination system prompts
+- **Three Developer Kits** — `opd` (OpenAI), `god` (Google), `anth` (Anthropic) — each with `chat()`, `achat()`, `stream()`, `astream()`, `embed()`, and `aembed()`
+- **Strict Pydantic models** for every input and output — no raw dicts anywhere
+- **Automatic JSON parsing** — responses are cleaned of markdown fences and auto-parsed
+- **Unified tool calling** — define tools once as Python functions, use them with any provider
+- **Streaming with typed chunks** — every `StreamChunk` has `.delta.text`, `.accumulated_text`, `.is_final`, `.usage`
+
+---
+
+## Installation
+
+```bash
+# Core package (includes RACTO prompt engine and tool registry)
+pip install ractogateway
+
+# With a specific provider
+pip install ractogateway[openai]
+pip install ractogateway[google]
+pip install ractogateway[anthropic]
+
+# All providers
+pip install ractogateway[all]
+
+# Development (all providers + testing + linting)
+pip install ractogateway[dev]
+```
+
+**Requirements:** Python 3.10+, Pydantic 2.0+
+
+---
+
+## Quick Start
+
+### 1. Define a RACTO Prompt
+
+Every prompt is a validated Pydantic model with five required fields:
+
+```python
+from ractogateway import RactoPrompt
+
+prompt = RactoPrompt(
+    role="You are a senior Python code reviewer at a Fortune 500 company.",
+    aim="Review the given code for bugs, security vulnerabilities, and PEP-8 violations.",
+    constraints=[
+        "Only report issues you are certain about.",
+        "Do not suggest stylistic preferences.",
+        "If no issues are found, say so explicitly.",
+        "Never fabricate code examples that you cannot verify.",
+    ],
+    tone="Professional and concise",
+    output_format="json",
+)
+```
+
+### 2. Use a Developer Kit
+
+```python
+from ractogateway import openai_developer_kit as opd
+
+kit = opd.OpenAIDeveloperKit(
+    model="gpt-4o",
+    api_key="sk-...",          # or set OPENAI_API_KEY env var
+    default_prompt=prompt,
+)
+
+# Synchronous chat
+response = kit.chat(opd.ChatConfig(user_message="Review this function:\ndef add(a, b): return a + b"))
+print(response.content)        # cleaned text
+print(response.parsed)         # auto-parsed JSON dict (if response was JSON)
+print(response.usage)          # {"prompt_tokens": 42, "completion_tokens": 18, "total_tokens": 60}
+```
+
+### 3. Stream Responses
+
+```python
+for chunk in kit.stream(opd.ChatConfig(user_message="Explain Python generators")):
+    print(chunk.delta.text, end="", flush=True)
+    if chunk.is_final:
+        print(f"\n\nTokens used: {chunk.usage}")
+```
+
+### 4. Async Support
+
+```python
+import asyncio
+
+async def main():
+    response = await kit.achat(opd.ChatConfig(user_message="What is SOLID?"))
+    print(response.content)
+
+    async for chunk in kit.astream(opd.ChatConfig(user_message="Explain SOLID")):
+        print(chunk.delta.text, end="", flush=True)
+
+asyncio.run(main())
+```
+
+---
+
+## Developer Kits
+
+RactoGateway provides three developer kits — one per provider. Each is a self-contained module with the kit class, all input models, and all output models.
+
+```python
+from ractogateway import openai_developer_kit as opd       # OpenAI / Azure OpenAI
+from ractogateway import google_developer_kit as god        # Google Gemini
+from ractogateway import anthropic_developer_kit as anth    # Anthropic Claude
+```
+
+### Method Reference
+
+| Method | `opd` | `god` | `anth` | Description |
+| --- | :---: | :---: | :---: | --- |
+| `chat(config)` | Yes | Yes | Yes | Synchronous chat completion |
+| `achat(config)` | Yes | Yes | Yes | Async chat completion |
+| `stream(config)` | Yes | Yes | Yes | Sync streaming (yields `StreamChunk`) |
+| `astream(config)` | Yes | Yes | Yes | Async streaming (yields `StreamChunk`) |
+| `embed(config)` | Yes | Yes | -- | Sync embeddings |
+| `aembed(config)` | Yes | Yes | -- | Async embeddings |
+
+> Anthropic does not offer a native embedding API. Use the OpenAI or Google kit for embeddings.
+
+### Kit Constructors
+
+```python
+# OpenAI
+kit = opd.OpenAIDeveloperKit(
+    model="gpt-4o",                            # required
+    api_key="sk-...",                          # or OPENAI_API_KEY env var
+    base_url="https://custom-proxy.com/v1",    # optional (Azure, proxies)
+    embedding_model="text-embedding-3-small",  # default
+    default_prompt=prompt,                     # optional
+)
+
+# Google Gemini
+kit = god.GoogleDeveloperKit(
+    model="gemini-2.0-flash",                  # required
+    api_key="AIza...",                         # or GEMINI_API_KEY env var
+    embedding_model="text-embedding-004",      # default
+    default_prompt=prompt,                     # optional
+)
+
+# Anthropic Claude
+kit = anth.AnthropicDeveloperKit(
+    model="claude-sonnet-4-5-20250929",        # required
+    api_key="sk-ant-...",                      # or ANTHROPIC_API_KEY env var
+    default_prompt=prompt,                     # optional
+)
+```
+
+---
+
+## Input Models
+
+All inputs are strictly validated Pydantic models. No raw dicts. No positional argument sprawl.
+
+### `ChatConfig`
+
+The single input for `chat()`, `achat()`, `stream()`, and `astream()`.
+
+```python
+config = opd.ChatConfig(
+    user_message="Explain monads in simple terms.",   # required, min 1 char
+    prompt=prompt,                                     # optional (falls back to kit default)
+    temperature=0.3,                                   # 0.0–2.0, default 0.0
+    max_tokens=2048,                                   # default 4096
+    tools=my_tool_registry,                            # optional ToolRegistry
+    response_model=MyPydanticModel,                    # optional output validation
+    history=[                                          # optional multi-turn context
+        opd.Message(role=opd.MessageRole.USER, content="What is FP?"),
+        opd.Message(role=opd.MessageRole.ASSISTANT, content="Functional programming is..."),
+    ],
+    extra={"top_p": 0.9, "seed": 42},                 # provider-specific pass-through
+)
+```
+
+### `EmbeddingConfig`
+
+The input for `embed()` and `aembed()`.
+
+```python
+config = opd.EmbeddingConfig(
+    texts=["Hello world", "Goodbye world"],   # required, min 1 text
+    model="text-embedding-3-large",            # optional (overrides kit default)
+    dimensions=512,                            # optional (for models that support it)
+)
+```
+
+---
+
+## Output Models
+
+### `LLMResponse`
+
+Returned by `chat()` and `achat()`. Unified across all providers.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `content` | `str \| None` | Cleaned text (markdown fences stripped) |
+| `parsed` | `dict \| list \| None` | Auto-parsed JSON (if response was valid JSON) |
+| `tool_calls` | `list[ToolCallResult]` | Tool calls requested by the model |
+| `finish_reason` | `FinishReason` | `STOP`, `TOOL_CALL`, `LENGTH`, `CONTENT_FILTER`, `ERROR` |
+| `usage` | `dict[str, int]` | `prompt_tokens`, `completion_tokens`, `total_tokens` |
+| `raw` | `Any` | The unmodified provider response (escape hatch) |
+
+### `StreamChunk`
+
+Yielded by `stream()` and `astream()`. One per streaming event.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `delta.text` | `str` | Incremental text for this chunk |
+| `accumulated_text` | `str` | Full text accumulated so far |
+| `is_final` | `bool` | `True` only on the last chunk |
+| `finish_reason` | `FinishReason \| None` | Set on final chunk only |
+| `tool_calls` | `list[ToolCallResult]` | Populated on final chunk only |
+| `usage` | `dict[str, int]` | Populated on final chunk only |
+| `raw` | `Any` | Raw provider streaming event |
+
+### `EmbeddingResponse`
+
+Returned by `embed()` and `aembed()`.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `vectors` | `list[EmbeddingVector]` | Each has `.index`, `.text`, `.embedding` |
+| `model` | `str` | Model used for embedding |
+| `usage` | `dict[str, int]` | Token usage |
+
+---
+
+## RACTO Prompt Engine
+
+The RACTO principle structures every prompt into five unambiguous sections:
+
+| Letter | Field | Purpose |
+| :---: | --- | --- |
+| **R** | `role` | Who the model is |
+| **A** | `aim` | What it must accomplish |
+| **C** | `constraints` | Hard rules it must never violate |
+| **T** | `tone` | Communication style |
+| **O** | `output_format` | Exact shape of the response |
+
+### Compiled Output
+
+`prompt.compile()` produces a clearly delimited system prompt:
+
+```text
+[ROLE]
+You are a senior Python code reviewer at a Fortune 500 company.
+
+[AIM]
+Review the given code for bugs, security vulnerabilities, and PEP-8 violations.
+
+[CONSTRAINTS]
+- Only report issues you are certain about.
+- Do not suggest stylistic preferences.
+- If no issues are found, say so explicitly.
+- Never fabricate code examples that you cannot verify.
+
+[TONE]
+Professional and concise
+
+[OUTPUT]
+Respond ONLY with valid JSON. Do NOT wrap the response in markdown code
+fences (```json … ```) or add any commentary before or after the JSON object.
+
+[GUARDRAILS]
+- If you are unsure or lack sufficient information, state it explicitly rather than guessing.
+- Do NOT fabricate facts, citations, URLs, statistics, or code that you cannot verify.
+- Stick strictly to what is asked. Do not add unrequested information.
+- If the answer requires assumptions, list each assumption explicitly before proceeding.
+```
+
+### Advanced: Pydantic Schema as Output Format
+
+Pass a Pydantic model as `output_format` and the full JSON Schema is embedded directly in the prompt:
+
+```python
+from pydantic import BaseModel
+
+class CodeReview(BaseModel):
+    issues: list[str]
+    severity: str
+    suggestion: str
+
+prompt = RactoPrompt(
+    role="You are a code reviewer.",
+    aim="Review the code.",
+    constraints=["Only report real issues."],
+    tone="Concise",
+    output_format=CodeReview,     # JSON Schema embedded in prompt
+)
+```
+
+### Optional Fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `context` | `str` | Domain background injected between AIM and CONSTRAINTS |
+| `examples` | `list[dict]` | Few-shot input/output pairs for steering |
+| `anti_hallucination` | `bool` | Append `[GUARDRAILS]` block (default `True`) |
+
+---
+
+## Tool Calling
+
+Define tools as Python functions — never write nested JSON dicts.
+
+### Register Tools
+
+```python
+from ractogateway import ToolRegistry
+
+registry = ToolRegistry()
+
+@registry.register
+def get_weather(city: str, unit: str = "celsius") -> str:
+    """Get the current weather for a city.
+
+    :param city: The city name
+    :param unit: Temperature unit (celsius or fahrenheit)
+    """
+    # Your implementation here
+    return f"Weather in {city}: 22°{unit[0].upper()}"
+```
+
+### Use with Any Kit
+
+```python
+config = opd.ChatConfig(
+    user_message="What's the weather in Tokyo?",
+    tools=registry,
+)
+response = kit.chat(config)
+
+if response.tool_calls:
+    for tc in response.tool_calls:
+        print(f"Call: {tc.name}({tc.arguments})")
+        # Execute the function
+        fn = registry.get_callable(tc.name)
+        result = fn(**tc.arguments)
+```
+
+### Register Pydantic Models as Tools
+
+```python
+from pydantic import BaseModel, Field
+
+class SearchQuery(BaseModel):
+    """Search the knowledge base."""
+    query: str = Field(description="The search query")
+    max_results: int = Field(default=5, description="Maximum results to return")
+
+registry.register(SearchQuery)
+```
+
+---
+
+## Validated Response Models
+
+Force the LLM output through a Pydantic model for guaranteed structure:
+
+```python
+class SentimentResult(BaseModel):
+    sentiment: str       # "positive", "negative", "neutral"
+    confidence: float    # 0.0 to 1.0
+    reasoning: str
+
+config = opd.ChatConfig(
+    user_message="Analyze sentiment: 'This product is amazing!'",
+    response_model=SentimentResult,
+)
+response = kit.chat(config)
+print(response.parsed)
+# {"sentiment": "positive", "confidence": 0.95, "reasoning": "Strong positive adjective 'amazing'"}
+```
+
+---
+
+## Switching Providers
+
+Same `ChatConfig`, different kit. That's it.
+
+```python
+from ractogateway import openai_developer_kit as opd
+from ractogateway import google_developer_kit as god
+from ractogateway import anthropic_developer_kit as anth
+from ractogateway import RactoPrompt
+
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer the user's question accurately.",
+    constraints=["Be concise.", "Cite sources when possible."],
+    tone="Friendly and professional",
+    output_format="text",
+)
+
+config = opd.ChatConfig(user_message="What is quantum computing?")
+
+# OpenAI
+okit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
+print(okit.chat(config).content)
+
+# Google Gemini
+gkit = god.GoogleDeveloperKit(model="gemini-2.0-flash", default_prompt=prompt)
+print(gkit.chat(config).content)
+
+# Anthropic Claude
+akit = anth.AnthropicDeveloperKit(model="claude-sonnet-4-5-20250929", default_prompt=prompt)
+print(akit.chat(config).content)
+```
+
+---
+
+## Architecture
+
+```text
+src/ractogateway/
+├── __init__.py                          # Top-level: RactoPrompt, Gateway, tool, ToolRegistry
+├── py.typed                             # PEP 561 typed package marker
+│
+├── _models/                             # Shared Pydantic input/output models
+│   ├── chat.py                          #   ChatConfig, Message, MessageRole
+│   ├── stream.py                        #   StreamChunk, StreamDelta
+│   └── embedding.py                     #   EmbeddingConfig, EmbeddingResponse, EmbeddingVector
+│
+├── prompts/                             # RACTO Prompt Engine
+│   └── engine.py                        #   RactoPrompt model + compile()
+│
+├── tools/                               # Tool Registry
+│   └── registry.py                      #   @tool decorator, ToolRegistry, ToolSchema
+│
+├── adapters/                            # Internal provider adapters (Adapter Pattern)
+│   ├── base.py                          #   BaseLLMAdapter ABC, LLMResponse, FinishReason
+│   ├── openai_kit.py                    #   OpenAILLMKit
+│   ├── google_kit.py                    #   GoogleLLMKit
+│   └── anthropic_kit.py                 #   AnthropicLLMKit
+│
+├── gateway/                             # Unified Gateway Runner
+│   └── runner.py                        #   Gateway orchestrator class
+│
+├── openai_developer_kit/                # OpenAI Developer Kit (import as opd)
+│   └── kit.py                           #   OpenAIDeveloperKit class
+│
+├── google_developer_kit/                # Google Developer Kit (import as god)
+│   └── kit.py                           #   GoogleDeveloperKit class
+│
+└── anthropic_developer_kit/             # Anthropic Developer Kit (import as anth)
+    └── kit.py                           #   AnthropicDeveloperKit class
+```
+
+### Design Principles
+
+- **Lazy provider imports** — `openai`, `google-genai`, and `anthropic` SDKs are only imported when you instantiate a kit. `import ractogateway` never fails due to a missing optional dependency.
+- **Composition over inheritance** — Developer kits compose internal adapters rather than extending them, keeping the public API surface clean.
+- **Pydantic everywhere** — Every input is a validated model. Every output is a typed model. No `dict[str, Any]` at the API boundary.
+- **Sync + async parity** — Every method has both a synchronous and asynchronous variant.
+- **Provider-agnostic tool schemas** — Define tools once, use them with any provider. The internal adapters handle the translation.
+
+---
+
+## Environment Variables
+
+| Variable | Provider | Description |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | OpenAI | API key (used when `api_key` not passed to constructor) |
+| `GEMINI_API_KEY` | Google | API key (used when `api_key` not passed to constructor) |
+| `ANTHROPIC_API_KEY` | Anthropic | API key (used when `api_key` not passed to constructor) |
+
+---
+
+## Contributing
+
+Contributions are welcome. Please open an issue first to discuss what you'd like to change.
+
+```bash
+# Clone and install in development mode
+git clone https://github.com/IAMPathak2702/RactoGateway.git
+cd RactoGateway
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Lint and format
+ruff check src/ tests/
+ruff format src/ tests/
+
+# Type checking
+mypy src/
+```
+
+---
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) for details.
+
+Copyright 2025 Ved Prakash Pathak
+
+---
+
+## Author
+
+### Ved Prakash Pathak
+
+- GitHub: [@IAMPathak2702](https://github.com/IAMPathak2702)
+- Email: [vp.ved.vpp@gmail.com](mailto:vp.ved.vpp@gmail.com)
