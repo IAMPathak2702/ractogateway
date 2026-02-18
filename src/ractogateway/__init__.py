@@ -15,20 +15,37 @@ Core utilities::
 # Each kit lazily imports its provider SDK only when instantiated.
 from ractogateway import (
     anthropic_developer_kit,
+    finetune,
     google_developer_kit,
     openai_developer_kit,
 )
 from ractogateway.adapters.base import LLMResponse
+from ractogateway.finetune import (
+    AnthropicFineTuner,
+    GeminiFineTuner,
+    OpenAIFineTuner,
+    RactoDataset,
+    RactoTrainingExample,
+    RactoTrainingMessage,
+)
 from ractogateway.gateway.runner import Gateway
-from ractogateway.prompts.engine import RactoPrompt
+from ractogateway.prompts.engine import RactoFile, RactoPrompt
 from ractogateway.tools.registry import ToolRegistry, tool
 
 __all__ = [
+    "AnthropicFineTuner",
     "Gateway",
+    "GeminiFineTuner",
     "LLMResponse",
+    "OpenAIFineTuner",
+    "RactoDataset",
+    "RactoFile",
     "RactoPrompt",
+    "RactoTrainingExample",
+    "RactoTrainingMessage",
     "ToolRegistry",
     "anthropic_developer_kit",
+    "finetune",
     "google_developer_kit",
     "openai_developer_kit",
     "tool",
