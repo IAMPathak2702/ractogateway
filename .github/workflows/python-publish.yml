@@ -1,0 +1,106 @@
+name: Publish Python Package
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0) — must match the version in pyproject.toml"
+        required: true
+
+permissions:
+  contents: write   # needed to create GitHub Releases
+  id-token: write   # needed for PyPI OIDC trusted publishing
+
+jobs:
+  build-and-publish:
+    name: Build, Publish & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Source ────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for release-notes generation
+
+      # ── 2. Python ────────────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ── 3. Read pyproject.toml ───────────────────────────────────────────────
+      - name: Extract metadata from pyproject.toml
+        id: meta
+        run: |
+          python - <<'EOF'
+          import tomllib, os
+
+          with open("pyproject.toml", "rb") as f:
+              data = tomllib.load(f)
+
+          proj = data["project"]
+          name        = proj["name"]
+          version     = proj["version"]
+          description = proj.get("description", "")
+          license_id  = proj.get("license", "")
+          homepage    = proj.get("urls", {}).get("Homepage", "")
+
+          output_file = os.environ["GITHUB_OUTPUT"]
+          with open(output_file, "a") as out:
+              out.write(f"name={name}\n")
+              out.write(f"version={version}\n")
+              out.write(f"description={description}\n")
+              out.write(f"license={license_id}\n")
+              out.write(f"homepage={homepage}\n")
+
+          print(f"Package : {name}")
+          print(f"Version : {version}")
+          print(f"License : {license_id}")
+          print(f"Homepage: {homepage}")
+          EOF
+
+      # ── 4. Guard: tag must match pyproject.toml version ──────────────────────
+      - name: Verify tag matches pyproject.toml version
+        run: |
+          TAG="${{ github.ref_name }}"
+          # Strip leading 'v' for comparison
+          TAG_VER="${TAG#v}"
+          PKG_VER="${{ steps.meta.outputs.version }}"
+          if [ "$TAG_VER" != "$PKG_VER" ]; then
+            echo "ERROR: tag '$TAG' does not match pyproject.toml version '$PKG_VER'."
+            exit 1
+          fi
+          echo "Version check passed: $PKG_VER"
+
+      # ── 5. Build ─────────────────────────────────────────────────────────────
+      - name: Install build tools
+        run: pip install --upgrade build hatch
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: List build artifacts
+        run: ls -lh dist/
+
+      # ── 6. Publish to PyPI (OIDC trusted publishing — no token required) ─────
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # To use a token instead of OIDC, remove id-token permission above and
+        # uncomment the lines below (store token in repo Settings → Secrets):
+        # with:
+        #   password: ${{ secrets.PYPI_API_TOKEN }}
+
+      # ── 7. Create GitHub Release ──────────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "${{ steps.meta.outputs.name }} v${{ steps.meta.outputs.version }}"
+          body_path: README.md          # full README as release description
+          files: dist/*                 # attach .whl and .tar.gz
+          generate_release_notes: true  # append auto-generated commit notes below README
+          make_latest: true
