@@ -2,8 +2,19 @@ from __future__ import annotations
 
 import importlib
 import sys
+from pathlib import Path
 
 import pytest
+
+
+def _pyproject_version() -> str:
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    for line in pyproject.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version ="):
+            return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+
+    raise AssertionError("Unable to find project version in pyproject.toml")
 
 
 def test_package_import_is_lazy() -> None:
@@ -11,7 +22,7 @@ def test_package_import_is_lazy() -> None:
 
     module = importlib.import_module("ractogateway")
 
-    assert module.__version__ == "0.1.1"
+    assert module.__version__ == _pyproject_version()
     assert "ractogateway.rag" not in sys.modules
     assert "ractogateway.openai_developer_kit" not in sys.modules
 
