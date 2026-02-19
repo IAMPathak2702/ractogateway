@@ -1,8 +1,8 @@
 """Recursive character text splitter (LangChain-style).
 
-Tries progressively finer separators:
-  ``\\n\\n`` → ``\\n`` → ``. `` → `` `` → character-by-character
-until every piece fits within *chunk_size*.
+Tries progressively finer separators (``"\\n\\n"``, ``"\\n"``, ``". "``,
+``" "`` and finally character-by-character) until every piece fits within
+``chunk_size``.
 """
 
 from __future__ import annotations

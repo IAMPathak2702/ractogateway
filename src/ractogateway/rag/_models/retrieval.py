@@ -31,17 +31,6 @@ class RetrievalResult(BaseModel):
 
 class RAGResponse(BaseModel):
     """Combined output from a RAG query (retrieval + generation).
-
-    Attributes
-    ----------
-    answer:
-        The LLM-generated response, as a standard ``LLMResponse``.
-    sources:
-        The retrieved chunks that were injected as context.
-    query:
-        The original user question.
-    context_used:
-        The verbatim context string that was injected into the prompt.
     """
 
     answer: LLMResponse
