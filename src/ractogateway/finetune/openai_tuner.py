@@ -104,7 +104,10 @@ class OpenAIFineTuner:
         buf = io.BytesIO(jsonl_bytes)
         buf.name = "training_data.jsonl"
         response = client.files.create(file=buf, purpose="fine-tune")
-        return response.id
+        file_id = getattr(response, "id", None)
+        if not isinstance(file_id, str) or not file_id:
+            raise RuntimeError("OpenAI file upload succeeded but no file id was returned.")
+        return file_id
 
     # ------------------------------------------------------------------
     # Job management
@@ -162,7 +165,10 @@ class OpenAIFineTuner:
         if suffix:
             kwargs["suffix"] = suffix
         job = client.fine_tuning.jobs.create(**kwargs)
-        return job.id
+        job_id = getattr(job, "id", None)
+        if not isinstance(job_id, str) or not job_id:
+            raise RuntimeError("OpenAI fine-tuning job creation did not return a job id.")
+        return job_id
 
     def get_status(self, job_id: str) -> dict[str, Any]:
         """Retrieve the current status of a fine-tuning job.
@@ -260,7 +266,12 @@ class OpenAIFineTuner:
                 f"Fine-tuning job {job_id} ended with status "
                 f"'{status['status']}': {error}"
             )
-        return status["fine_tuned_model"]
+        fine_tuned_model = status.get("fine_tuned_model")
+        if not isinstance(fine_tuned_model, str) or not fine_tuned_model:
+            raise RuntimeError(
+                f"Fine-tuning job {job_id} succeeded but no fine_tuned_model was returned."
+            )
+        return fine_tuned_model
 
     # ------------------------------------------------------------------
     # High-level pipeline

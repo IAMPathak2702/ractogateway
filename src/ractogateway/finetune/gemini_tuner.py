@@ -131,7 +131,7 @@ class GeminiFineTuner:
         if errors:
             raise ValueError("Dataset validation failed:\n" + "\n".join(errors))
 
-        training_data: list[dict] = []
+        training_data: list[dict[str, Any]] = []
         for ex in dataset:
             record = ex.to_gemini_dict()
             if "text_input" not in record:
@@ -246,7 +246,11 @@ class GeminiFineTuner:
             raise RuntimeError(
                 f"Gemini tuning job failed.  Final state: {state}"
             )
-        return operation.result().name
+        result = operation.result()
+        model_name = getattr(result, "name", None)
+        if not isinstance(model_name, str) or not model_name:
+            raise RuntimeError("Gemini tuning completed but no tuned model name was returned.")
+        return model_name
 
     # ------------------------------------------------------------------
     # High-level pipeline

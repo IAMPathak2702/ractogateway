@@ -108,7 +108,7 @@ class ImageReader(BaseReader):
         tags = _load_exif_tags()
         result: dict[str, str] = {}
         try:
-            raw_exif = img._getexif()  # type: ignore[attr-defined]
+            raw_exif = img._getexif()
             if raw_exif:
                 for tag_id, value in raw_exif.items():
                     tag_name = tags.get(tag_id, str(tag_id))

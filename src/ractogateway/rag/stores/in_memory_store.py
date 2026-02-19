@@ -60,11 +60,12 @@ class InMemoryVectorStore(BaseVectorStore):
                 )
             ]
 
-        scored = [
-            (c, _cosine_similarity(embedding, c.embedding))  # type: ignore[arg-type]
-            for c in candidates
-            if c.embedding is not None
-        ]
+        scored: list[tuple[Chunk, float]] = []
+        for chunk in candidates:
+            chunk_embedding = chunk.embedding
+            if chunk_embedding is None:
+                continue
+            scored.append((chunk, _cosine_similarity(embedding, chunk_embedding)))
         scored.sort(key=lambda x: x[1], reverse=True)
         top = scored[:top_k]
 

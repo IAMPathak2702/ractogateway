@@ -16,7 +16,7 @@ import json
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Any, Iterator, Literal
 
 from ractogateway.prompts.engine import RactoFile
 
@@ -51,7 +51,7 @@ class RactoTrainingMessage:
     # Serialisation helpers (one per provider)
     # ------------------------------------------------------------------
 
-    def to_openai(self) -> dict:
+    def to_openai(self) -> dict[str, Any]:
         """Return an OpenAI-compatible message dict.
 
         Text-only messages produce ``{"role": ..., "content": str}``.
@@ -61,7 +61,7 @@ class RactoTrainingMessage:
         if not self.attachments:
             return {"role": self.role, "content": self.content}
 
-        parts: list[dict] = []
+        parts: list[dict[str, Any]] = []
         for f in self.attachments:
             if f.is_image or not (f.is_text or f.is_pdf):
                 parts.append(
@@ -79,7 +79,7 @@ class RactoTrainingMessage:
         parts.append({"type": "text", "text": self.content})
         return {"role": self.role, "content": parts}
 
-    def to_anthropic(self) -> dict:
+    def to_anthropic(self) -> dict[str, Any]:
         """Return an Anthropic-compatible message dict.
 
         System messages should be lifted to the top-level ``system`` field —
@@ -88,7 +88,7 @@ class RactoTrainingMessage:
         if not self.attachments:
             return {"role": self.role, "content": self.content}
 
-        parts: list[dict] = []
+        parts: list[dict[str, Any]] = []
         for f in self.attachments:
             if f.is_image:
                 parts.append(
@@ -127,9 +127,9 @@ class RactoTrainingMessage:
         parts.append({"type": "text", "text": self.content})
         return {"role": self.role, "content": parts}
 
-    def to_gemini_parts(self) -> list[dict]:
+    def to_gemini_parts(self) -> list[dict[str, Any]]:
         """Return a list of Gemini content parts (``text`` + ``inline_data``)."""
-        parts: list[dict] = []
+        parts: list[dict[str, Any]] = []
         for f in self.attachments:
             if f.is_text:
                 parts.append({"text": f.data.decode("utf-8", errors="replace")})
@@ -241,7 +241,7 @@ class RactoTrainingExample:
     # Serialisation
     # ------------------------------------------------------------------
 
-    def to_openai_dict(self) -> dict:
+    def to_openai_dict(self) -> dict[str, Any]:
         """Serialize to OpenAI fine-tuning JSONL record.
 
         Output format::
@@ -250,7 +250,7 @@ class RactoTrainingExample:
         """
         return {"messages": [m.to_openai() for m in self.messages]}
 
-    def to_anthropic_dict(self) -> dict:
+    def to_anthropic_dict(self) -> dict[str, Any]:
         """Serialize to Anthropic fine-tuning JSONL record.
 
         Output format::
@@ -260,18 +260,18 @@ class RactoTrainingExample:
         The ``system`` key is only present when a system message exists.
         """
         system = ""
-        messages: list[dict] = []
+        messages: list[dict[str, Any]] = []
         for m in self.messages:
             if m.role == "system":
                 system = m.content
             else:
                 messages.append(m.to_anthropic())
-        record: dict = {"messages": messages}
+        record: dict[str, Any] = {"messages": messages}
         if system:
             record["system"] = system
         return record
 
-    def to_gemini_dict(self) -> dict:
+    def to_gemini_dict(self) -> dict[str, Any]:
         """Serialize to Gemini tuning record.
 
         For text-only single-turn examples (most common) the output is::
@@ -292,7 +292,7 @@ class RactoTrainingExample:
             return {"text_input": user_msg.content, "output": asst_msg.content}
 
         # Multi-turn or multimodal → Vertex AI contents format
-        contents: list[dict] = []
+        contents: list[dict[str, Any]] = []
         for m in non_system:
             gemini_role = "model" if m.role == "assistant" else "user"
             contents.append({"role": gemini_role, "parts": m.to_gemini_parts()})
@@ -657,7 +657,7 @@ class RactoDataset:
     # Introspection
     # ------------------------------------------------------------------
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, Any]:
         """Return brief statistics about the dataset.
 
         Returns

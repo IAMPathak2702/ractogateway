@@ -324,7 +324,8 @@ class RactoRAG:
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        answer: LLMResponse = self._llm_kit.chat(config)
+        llm_kit = self._require_llm_kit()
+        answer: LLMResponse = llm_kit.chat(config)
         return RAGResponse(
             answer=answer,
             sources=sources,
@@ -352,7 +353,8 @@ class RactoRAG:
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        answer: LLMResponse = await self._llm_kit.achat(config)
+        llm_kit = self._require_llm_kit()
+        answer: LLMResponse = await llm_kit.achat(config)
         return RAGResponse(
             answer=answer,
             sources=sources,
@@ -440,9 +442,10 @@ class RactoRAG:
             )
         return "\n\n".join(parts)
 
-    def _require_llm_kit(self) -> None:
+    def _require_llm_kit(self) -> Any:
         if self._llm_kit is None:
             raise RuntimeError(
                 "RactoRAG.query() requires an llm_kit. "
                 "Pass one at construction time: RactoRAG(..., llm_kit=kit)"
             )
+        return self._llm_kit

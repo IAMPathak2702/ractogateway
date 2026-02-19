@@ -199,4 +199,4 @@ class MilvusStore(BaseVectorStore):
             self._init()
         if self._collection is None:
             return 0
-        return self._collection.num_entities
+        return int(self._collection.num_entities)

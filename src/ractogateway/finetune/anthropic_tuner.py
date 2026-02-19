@@ -110,7 +110,10 @@ class AnthropicFineTuner:
         response = client.beta.files.upload(
             file=("training_data.jsonl", buf, "application/jsonl"),
         )
-        return response.id
+        file_id = getattr(response, "id", None)
+        if not isinstance(file_id, str) or not file_id:
+            raise RuntimeError("Anthropic file upload succeeded but no file id was returned.")
+        return file_id
 
     # ------------------------------------------------------------------
     # Job management
@@ -157,7 +160,10 @@ class AnthropicFineTuner:
         if hyperparameters:
             kwargs["hyperparameters"] = hyperparameters
         job = client.fine_tuning.jobs.create(**kwargs)
-        return job.id
+        job_id = getattr(job, "id", None)
+        if not isinstance(job_id, str) or not job_id:
+            raise RuntimeError("Anthropic fine-tuning job creation did not return a job id.")
+        return job_id
 
     def get_status(self, job_id: str) -> dict[str, Any]:
         """Retrieve the current status of a fine-tuning job.

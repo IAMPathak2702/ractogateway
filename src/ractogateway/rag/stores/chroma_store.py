@@ -153,4 +153,4 @@ class ChromaStore(BaseVectorStore):
 
     def count(self) -> int:
         self._init()
-        return self._collection.count()
+        return int(self._collection.count())

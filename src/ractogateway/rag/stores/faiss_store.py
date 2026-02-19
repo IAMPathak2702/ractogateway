@@ -74,9 +74,19 @@ class FAISSStore(BaseVectorStore):
 
     def add(self, chunks: list[Chunk]) -> None:
         self._require_embeddings(chunks)
-        dim = len(chunks[0].embedding)  # type: ignore[arg-type]
+        first_embedding = chunks[0].embedding
+        if first_embedding is None:
+            raise ValueError("Chunks must have embeddings before adding to FAISSStore.")
+        dim = len(first_embedding)
         self._init_index(dim)
-        vectors = [c.embedding for c in chunks]  # type: ignore[misc]
+        vectors: list[list[float]] = []
+        for chunk in chunks:
+            chunk_embedding = chunk.embedding
+            if chunk_embedding is None:
+                raise ValueError(
+                    "Chunks must have embeddings before adding to FAISSStore."
+                )
+            vectors.append(chunk_embedding)
         self._index.add(self._to_numpy(vectors))
         self._chunks.extend(chunks)
 
