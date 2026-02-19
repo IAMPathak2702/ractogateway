@@ -63,10 +63,17 @@ autodoc_typehints = "description"
 autodoc_typehints_description_target = "documented"
 always_use_bars_union = True        # PEP 604 union style in docs
 
-# Napoleon settings
-napoleon_google_docstring = True
-napoleon_numpy_docstring = False
+# Napoleon settings — source files use NumPy-style docstrings
+napoleon_google_docstring = False
+napoleon_numpy_docstring = True
 napoleon_use_rtype = False          # type shown inline, not in :rtype:
+
+# Suppress known non-actionable warnings
+suppress_warnings = [
+    "py.duplicate",                                 # classes re-exported via kit __init__.py
+    "sphinx_autodoc_typehints.forward_reference",   # JsonValue forward ref in engine.py
+    "sphinx_autodoc_typehints.guarded_import",      # classmethod subscript in typehints
+]
 
 # intersphinx — link to upstream docs
 intersphinx_mapping = {
