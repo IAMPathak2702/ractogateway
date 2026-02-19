@@ -29,6 +29,29 @@ extensions = [
 # MyST options
 myst_enable_extensions = ["colon_fence", "deflist"]
 
+# Mock all optional dependencies so autodoc doesn't fail when they aren't installed
+autodoc_mock_imports = [
+    "openai",
+    "anthropic",
+    "google",
+    "google.genai",
+    "pypdf",
+    "docx",
+    "openpyxl",
+    "PIL",
+    "nltk",
+    "chromadb",
+    "faiss",
+    "pinecone",
+    "qdrant_client",
+    "weaviate",
+    "pymilvus",
+    "psycopg2",
+    "pgvector",
+    "voyageai",
+    "numpy",
+]
+
 # autodoc options
 autodoc_default_options = {
     "members": True,
@@ -56,7 +79,6 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 # -- Options for HTML output ---------------------------------------------------
 html_theme = "sphinx_rtd_theme"     # sphinx-rtd-theme>=2.0
-html_static_path = ["_static"]
 html_theme_options = {
     "navigation_depth": 4,
     "titles_only": False,
