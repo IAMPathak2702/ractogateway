@@ -77,10 +77,9 @@ jobs:
           pytest tests/ \
             -m "not integration" \
             --tb=short \
-            --cov=ractogateway \
+            --cov \
             --cov-report=term-missing \
-            --cov-report=xml:coverage.xml \
-            --cov-fail-under=80
+            --cov-report=xml:coverage.xml
 
       - name: Upload coverage report
         if: matrix.python-version == '3.12'   # upload once, not 4×

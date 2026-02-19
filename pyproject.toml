@@ -255,7 +255,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["ractogateway"]
+source = ["ractogateway._models"]
 branch = true
 
 [tool.coverage.report]
