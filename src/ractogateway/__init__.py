@@ -116,4 +116,4 @@ __all__ = [
     "openai_developer_kit",
     "rag",
 ]
-__version__ = "0.1.0"
+__version__ = "0.1.1"

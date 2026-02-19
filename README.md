@@ -4,7 +4,7 @@
 
 RactoGateway is a unified AI SDK that gives you a single, clean interface to OpenAI, Google Gemini, and Anthropic Claude — with built-in anti-hallucination prompting, strict Pydantic validation, streaming, tool calling, embeddings, fine-tuning, and a full RAG pipeline. No more messy JSON dicts. No more provider lock-in. No more inconsistent response formats.
 
-[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-blue.svg)](https://pypi.org/project/ractogateway/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.1.1-blue.svg)](https://pypi.org/project/ractogateway/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Documentation](https://img.shields.io/badge/docs-GitHub-green.svg)](https://github.com/IAMPathak2702/RactoGateway)
@@ -15,6 +15,7 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 
 - [Why RactoGateway?](#why-ractogateway)
 - [Installation](#installation)
+- [5-Line Quick Start](#5-line-quick-start)
 - [RACTO Prompt Engine](#racto-prompt-engine)
 - [Developer Kits](#developer-kits)
 - [Streaming](#streaming)
@@ -24,6 +25,7 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 - [Validated Response Models](#validated-response-models)
 - [Multi-turn Conversations](#multi-turn-conversations)
 - [Multimodal Attachments — Images & Files](#multimodal-attachments)
+- [Low-Level Gateway](#low-level-gateway)
 - [Switching Providers](#switching-providers)
 - [Fine-Tuning](#fine-tuning)
 - [RAG — Retrieval-Augmented Generation](#rag)
@@ -39,12 +41,13 @@ Every LLM provider has a different SDK, different request format, different resp
 RactoGateway solves this by providing:
 
 - **RACTO Prompt Engine** — a structured prompt framework (Role, Aim, Constraints, Tone, Output) that compiles into optimized, anti-hallucination system prompts
-- **Three Developer Kits** — `opd` (OpenAI), `god` (Google), `anth` (Anthropic) — each with `chat()`, `achat()`, `stream()`, `astream()`, `embed()`, and `aembed()`
+- **Three Developer Kits** — `gpt` (OpenAI), `gemini` (Google), `claude` (Anthropic) — each with `chat()`, `achat()`, `stream()`, `astream()`, `embed()`, and `aembed()`
 - **Strict Pydantic models** for every input and output — no raw dicts anywhere
 - **Automatic JSON parsing** — responses are cleaned of markdown fences and auto-parsed
 - **Unified tool calling** — define tools once as Python functions, use them with any provider
 - **Streaming with typed chunks** — every `StreamChunk` has `.delta.text`, `.accumulated_text`, `.is_final`, `.usage`
 - **RAG pipeline** — ingest files, embed, store, retrieve, and generate answers with one class
+- **Low-level Gateway** — wraps any adapter for direct prompt execution without `ChatConfig`
 
 ---
 
@@ -95,6 +98,36 @@ pip install ractogateway[dev]
 
 ---
 
+## 5-Line Quick Start
+
+This is the absolute minimum to get a response from any AI — no configuration needed beyond your API key:
+
+```python
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
+
+# 1. Describe what you want the AI to do
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer the user's question clearly.",
+    constraints=["Be concise."],
+    tone="Friendly",
+    output_format="text",
+)
+
+# 2. Create your AI chat (reads OPENAI_API_KEY from environment automatically)
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt)
+
+# 3. Ask something!
+response = kit.chat(gpt.ChatConfig(user_message="What is Python?"))
+print(response.content)
+# "Python is a beginner-friendly, high-level programming language used for web
+#  development, data science, AI, automation, and much more."
+```
+
+That's it. Swap `gpt` for `gemini` or `claude` and the exact same code works with Google or Anthropic.
+
+---
+
 ## RACTO Prompt Engine
 
 The **RACTO** principle structures every prompt into five unambiguous sections so the model always knows exactly what to do — and what NOT to do.
@@ -125,6 +158,27 @@ prompt = RactoPrompt(
     output_format="json",
 )
 ```
+
+### All `RactoPrompt` Fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | :---: | --- | --- |
+| `role` | `str` | Yes | — | Who the model is |
+| `aim` | `str` | Yes | — | Task objective |
+| `constraints` | `list[str]` | Yes | — | Hard rules (min 1 item) |
+| `tone` | `str` | Yes | — | Communication style |
+| `output_format` | `str \| type[BaseModel]` | Yes | — | `"json"`, `"text"`, `"markdown"`, free-form description, or a Pydantic class |
+| `context` | `str \| None` | No | `None` | Domain background injected between AIM and CONSTRAINTS |
+| `examples` | `list[dict] \| None` | No | `None` | Few-shot pairs — each dict requires `"input"` and `"output"` keys |
+| `anti_hallucination` | `bool` | No | `True` | Append `[GUARDRAILS]` block |
+
+### `RactoPrompt` Methods
+
+| Method | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `compile()` | `() -> str` | `str` | Generate the full system prompt string |
+| `__str__()` | `() -> str` | `str` | Shortcut for `compile()` |
+| `to_messages()` | `(user_message, attachments=None, provider="generic") -> list[dict]` | `list[dict]` | Build a provider-ready message list |
 
 ### What `prompt.compile()` Produces
 
@@ -157,19 +211,6 @@ fences (```json … ```) or add any commentary before or after the JSON object.
 - If the answer requires assumptions, list each assumption explicitly before proceeding.
 ```
 
-### All `RactoPrompt` Fields
-
-| Field | Type | Required | Default | Description |
-| --- | --- | :---: | --- | --- |
-| `role` | `str` | Yes | — | Who the model is |
-| `aim` | `str` | Yes | — | Task objective |
-| `constraints` | `list[str]` | Yes | — | Hard rules (min 1) |
-| `tone` | `str` | Yes | — | Communication style |
-| `output_format` | `str \| type[BaseModel]` | Yes | — | `"json"`, `"text"`, `"markdown"`, free-form, or a Pydantic class |
-| `context` | `str \| None` | No | `None` | Domain background injected between AIM and CONSTRAINTS |
-| `examples` | `list[dict]` | No | `None` | Few-shot pairs — each dict needs `"input"` and `"output"` keys |
-| `anti_hallucination` | `bool` | No | `True` | Append `[GUARDRAILS]` block |
-
 ### Pydantic Model as Output Format
 
 Pass a Pydantic model class as `output_format` and the full JSON Schema is embedded in the compiled prompt automatically:
@@ -194,6 +235,7 @@ print(prompt.compile())
 ```
 
 Compiled output (OUTPUT section):
+
 ```text
 [OUTPUT]
 Respond ONLY with valid JSON that conforms exactly to the following JSON Schema.
@@ -230,6 +272,16 @@ prompt = RactoPrompt(
 
 ### `to_messages()` — Ready-to-Send Message List
 
+**Input parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `user_message` | `str` | — | The end-user's query (required) |
+| `attachments` | `list[RactoFile] \| None` | `None` | Optional file/image attachments |
+| `provider` | `str` | `"generic"` | `"openai"`, `"anthropic"`, `"google"`, or `"generic"` |
+
+**Output:** `list[dict[str, Any]]` — a list of message dicts ready to send to the provider
+
 ```python
 messages = prompt.to_messages(
     "Review this: def add(a, b): return a + b",
@@ -247,52 +299,94 @@ messages = prompt.to_messages(
 
 ## Developer Kits
 
-RactoGateway provides three developer kits — one per provider. Import them as short aliases:
+RactoGateway has three kits — one for each AI provider. Import them with names you already know, then call `.Chat(...)` to create your AI:
 
 ```python
-from ractogateway import openai_developer_kit as opd       # OpenAI / Azure OpenAI
-from ractogateway import google_developer_kit as god        # Google Gemini
-from ractogateway import anthropic_developer_kit as anth    # Anthropic Claude
+from ractogateway import openai_developer_kit as gpt      # ChatGPT / OpenAI
+from ractogateway import google_developer_kit as gemini   # Google Gemini
+from ractogateway import anthropic_developer_kit as claude # Anthropic Claude
 ```
 
-### Kit Constructors
+> **Note:** `and` is a reserved Python keyword in Python, so we use `claude` instead — cleaner anyway!
+
+### Creating a Chat
+
+Every kit exposes a `Chat` class — short, readable, and always works the same way:
 
 ```python
-# OpenAI
-kit = opd.OpenAIDeveloperKit(
-    model="gpt-4o",                            # required
-    api_key="sk-...",                          # or set OPENAI_API_KEY env var
-    base_url="https://custom-proxy.com/v1",    # optional (Azure, proxies)
-    embedding_model="text-embedding-3-small",  # default
-    default_prompt=prompt,                     # optional — used when ChatConfig.prompt is not set
+# Just pick your provider and model — that's it!
+kit = gpt.Chat(model="gpt-4o")
+kit = gemini.Chat(model="gemini-2.0-flash")
+kit = claude.Chat(model="claude-sonnet-4-6")
+```
+
+The API key is read automatically from your environment variable (`OPENAI_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY`). No extra setup needed.
+
+**Full constructor options (all optional except `model`):**
+
+```python
+# OpenAI / ChatGPT
+kit = gpt.Chat(
+    model="gpt-4o",                            # which model to use
+    api_key="sk-...",                          # skip if OPENAI_API_KEY is set
+    base_url="https://custom-proxy.com/v1",    # optional: Azure or custom proxy
+    embedding_model="text-embedding-3-small",  # for embed() calls
+    default_prompt=prompt,                     # auto-used in every chat if set
 )
 
 # Google Gemini
-kit = god.GoogleDeveloperKit(
-    model="gemini-2.0-flash",                  # required
-    api_key="AIza...",                         # or set GEMINI_API_KEY env var
-    embedding_model="text-embedding-004",      # default
-    default_prompt=prompt,                     # optional
+kit = gemini.Chat(
+    model="gemini-2.0-flash",                  # which model to use
+    api_key="AIza...",                         # skip if GEMINI_API_KEY is set
+    embedding_model="text-embedding-004",      # for embed() calls
+    default_prompt=prompt,                     # auto-used in every chat if set
 )
 
 # Anthropic Claude
-kit = anth.AnthropicDeveloperKit(
-    model="claude-sonnet-4-6",                 # required
-    api_key="sk-ant-...",                      # or set ANTHROPIC_API_KEY env var
-    default_prompt=prompt,                     # optional
+kit = claude.Chat(
+    model="claude-sonnet-4-6",                 # which model to use
+    api_key="sk-ant-...",                      # skip if ANTHROPIC_API_KEY is set
+    default_prompt=prompt,                     # auto-used in every chat if set
 )
 ```
 
+**`OpenAIDeveloperKit` / `gpt.Chat` constructor parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | `str` | `"gpt-4o"` | Chat model identifier |
+| `api_key` | `str \| None` | `None` | Falls back to `OPENAI_API_KEY` env var |
+| `base_url` | `str \| None` | `None` | Azure OpenAI or proxy base URL |
+| `embedding_model` | `str` | `"text-embedding-3-small"` | Default model for `embed()` calls |
+| `default_prompt` | `RactoPrompt \| None` | `None` | Auto-used when `ChatConfig.prompt` is `None` |
+
+**`GoogleDeveloperKit` / `gemini.Chat` constructor parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | `str` | `"gemini-2.0-flash"` | Chat model identifier |
+| `api_key` | `str \| None` | `None` | Falls back to `GEMINI_API_KEY` env var |
+| `embedding_model` | `str` | `"text-embedding-004"` | Default model for `embed()` calls |
+| `default_prompt` | `RactoPrompt \| None` | `None` | Auto-used when `ChatConfig.prompt` is `None` |
+
+**`AnthropicDeveloperKit` / `claude.Chat` constructor parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | `str` | — | Chat model identifier (required) |
+| `api_key` | `str \| None` | `None` | Falls back to `ANTHROPIC_API_KEY` env var |
+| `default_prompt` | `RactoPrompt \| None` | `None` | Auto-used when `ChatConfig.prompt` is `None` |
+
 ### Method Reference
 
-| Method | `opd` | `god` | `anth` | Description |
-| --- | :---: | :---: | :---: | --- |
-| `chat(config)` | Yes | Yes | Yes | Synchronous chat completion → `LLMResponse` |
-| `achat(config)` | Yes | Yes | Yes | Async chat completion → `LLMResponse` |
-| `stream(config)` | Yes | Yes | Yes | Sync streaming → yields `StreamChunk` |
-| `astream(config)` | Yes | Yes | Yes | Async streaming → yields `StreamChunk` |
-| `embed(config)` | Yes | Yes | — | Sync embeddings → `EmbeddingResponse` |
-| `aembed(config)` | Yes | Yes | — | Async embeddings → `EmbeddingResponse` |
+| Method | `gpt` | `gemini` | `claude` | Input | Output |
+| --- | :---: | :---: | :---: | --- | --- |
+| `chat(config)` | Yes | Yes | Yes | `ChatConfig` | `LLMResponse` |
+| `achat(config)` | Yes | Yes | Yes | `ChatConfig` | `LLMResponse` |
+| `stream(config)` | Yes | Yes | Yes | `ChatConfig` | `Iterator[StreamChunk]` |
+| `astream(config)` | Yes | Yes | Yes | `ChatConfig` | `AsyncIterator[StreamChunk]` |
+| `embed(config)` | Yes | Yes | — | `EmbeddingConfig` | `EmbeddingResponse` |
+| `aembed(config)` | Yes | Yes | — | `EmbeddingConfig` | `EmbeddingResponse` |
 
 > Anthropic does not offer a native embedding API. Use the OpenAI or Google kit for embeddings.
 
@@ -303,7 +397,7 @@ kit = anth.AnthropicDeveloperKit(
 The single input object for `chat()`, `achat()`, `stream()`, and `astream()`.
 
 ```python
-config = opd.ChatConfig(
+config = gpt.ChatConfig(
     user_message="Explain monads in simple terms.",   # required
     prompt=prompt,                                     # optional — overrides kit default
     temperature=0.3,                                   # 0.0–2.0, default 0.0
@@ -311,13 +405,54 @@ config = opd.ChatConfig(
     tools=my_tool_registry,                            # optional ToolRegistry
     response_model=MyPydanticModel,                    # optional output validation
     history=[                                          # optional multi-turn context
-        opd.Message(role=opd.MessageRole.USER, content="What is FP?"),
-        opd.Message(role=opd.MessageRole.ASSISTANT, content="Functional programming is..."),
+        gpt.Message(role=gpt.MessageRole.USER, content="What is FP?"),
+        gpt.Message(role=gpt.MessageRole.ASSISTANT, content="Functional programming is..."),
     ],
-    attachments=[RactoFile.from_path("diagram.png")], # optional file attachments
     extra={"top_p": 0.9, "seed": 42},                 # provider-specific pass-through
 )
 ```
+
+**`ChatConfig` field reference:**
+
+| Field | Type | Required | Default | Description |
+| --- | --- | :---: | --- | --- |
+| `user_message` | `str` | Yes | — | End-user's query (min 1 character) |
+| `prompt` | `RactoPrompt \| None` | No | `None` | Overrides the kit's `default_prompt` for this call |
+| `temperature` | `float` | No | `0.0` | Sampling temperature (0.0–2.0) |
+| `max_tokens` | `int` | No | `4096` | Maximum tokens in the completion (>0) |
+| `tools` | `ToolRegistry \| None` | No | `None` | Tool registry for function/tool calling |
+| `response_model` | `type[BaseModel] \| None` | No | `None` | Validate JSON output against this Pydantic model |
+| `history` | `list[Message]` | No | `[]` | Prior conversation turns for multi-turn chat |
+| `extra` | `dict[str, Any]` | No | `{}` | Provider-specific pass-through kwargs (e.g. `top_p`, `seed`, `stop`) |
+
+> **Note:** Either `ChatConfig.prompt` or the kit's `default_prompt` must be set — at least one is required.
+
+---
+
+### `Message` and `MessageRole`
+
+Used to build conversation history for multi-turn chat.
+
+```python
+from ractogateway import openai_developer_kit as gpt
+
+msg = gpt.Message(role=gpt.MessageRole.USER, content="What is Python?")
+```
+
+**`Message` field reference:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `role` | `MessageRole` | `SYSTEM`, `USER`, or `ASSISTANT` |
+| `content` | `str` | The message text |
+
+**`MessageRole` enum values:**
+
+| Value | String | Description |
+| --- | --- | --- |
+| `MessageRole.SYSTEM` | `"system"` | System instruction |
+| `MessageRole.USER` | `"user"` | Human turn |
+| `MessageRole.ASSISTANT` | `"assistant"` | Model turn |
 
 ---
 
@@ -326,7 +461,7 @@ config = opd.ChatConfig(
 Returned by `chat()` and `achat()`. Same shape for all three providers.
 
 ```python
-response = kit.chat(opd.ChatConfig(user_message="What is 2 + 2?"))
+response = kit.chat(gpt.ChatConfig(user_message="What is 2 + 2?"))
 
 response.content        # "4"  — cleaned text (markdown fences auto-stripped)
 response.parsed         # None  (not JSON) or dict/list if JSON
@@ -346,8 +481,8 @@ prompt = RactoPrompt(
     tone="Concise",
     output_format="json",
 )
-kit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
-response = kit.chat(opd.ChatConfig(user_message="My name is Alice and I am 30 years old."))
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt)
+response = kit.chat(gpt.ChatConfig(user_message="My name is Alice and I am 30 years old."))
 
 print(response.content)
 # '{"name": "Alice", "age": 30}'
@@ -373,6 +508,16 @@ print(response.usage)
 | `usage` | `dict[str, int]` | `prompt_tokens`, `completion_tokens`, `total_tokens` |
 | `raw` | `Any` | The unmodified provider response (escape hatch for advanced use) |
 
+**`FinishReason` enum values:**
+
+| Value | String | When set |
+| --- | --- | --- |
+| `FinishReason.STOP` | `"stop"` | Normal completion |
+| `FinishReason.TOOL_CALL` | `"tool_call"` | Model requested a function/tool call |
+| `FinishReason.LENGTH` | `"length"` | Hit `max_tokens` limit |
+| `FinishReason.CONTENT_FILTER` | `"content_filter"` | Filtered by safety system |
+| `FinishReason.ERROR` | `"error"` | Internal error |
+
 ---
 
 ## Streaming
@@ -380,7 +525,7 @@ print(response.usage)
 `stream()` and `astream()` yield `StreamChunk` objects — one per streaming event.
 
 ```python
-from ractogateway import openai_developer_kit as opd, RactoPrompt
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
 
 prompt = RactoPrompt(
     role="You are a Python teacher.",
@@ -389,9 +534,9 @@ prompt = RactoPrompt(
     tone="Friendly",
     output_format="text",
 )
-kit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt)
 
-for chunk in kit.stream(opd.ChatConfig(user_message="Explain Python generators")):
+for chunk in kit.stream(gpt.ChatConfig(user_message="Explain Python generators")):
     print(chunk.delta.text, end="", flush=True)   # incremental text
     if chunk.is_final:
         print()
@@ -403,31 +548,41 @@ for chunk in kit.stream(opd.ChatConfig(user_message="Explain Python generators")
 **Example output:**
 
 ```
-A generator in Python is a special function that yields values one at a time...
+A generator in Python is a special function that yields values one at a time,
+allowing you to iterate over a sequence without loading everything into memory.
 
-```python
 def count_up(n):
     for i in range(n):
         yield i
 
 for num in count_up(5):
     print(num)  # 0, 1, 2, 3, 4
-```
+
 Finish reason : FinishReason.STOP
 Tokens used   : {"prompt_tokens": 55, "completion_tokens": 120, "total_tokens": 175}
 Full response : A generator in Python is a special function that yields values one at a time...
+```
 
 ### `StreamChunk` Field Reference
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `delta.text` | `str` | Incremental text added in this chunk |
+| `delta` | `StreamDelta` | Incremental content in this chunk |
 | `accumulated_text` | `str` | Full text accumulated from all chunks so far |
 | `is_final` | `bool` | `True` only on the very last chunk |
 | `finish_reason` | `FinishReason \| None` | Set only on the final chunk |
 | `tool_calls` | `list[ToolCallResult]` | Populated on the final chunk only (if tool calls occurred) |
 | `usage` | `dict[str, int]` | Token usage — populated on the final chunk only |
 | `raw` | `Any` | Raw provider streaming event |
+
+### `StreamDelta` Field Reference
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `text` | `str` | Incremental text added in this chunk (empty string when no text) |
+| `tool_call_id` | `str \| None` | Call ID of the tool call being streamed |
+| `tool_call_name` | `str \| None` | Name of the tool being called |
+| `tool_call_args_fragment` | `str \| None` | Partial JSON argument fragment |
 
 ---
 
@@ -437,7 +592,7 @@ Every method has a matching async variant.
 
 ```python
 import asyncio
-from ractogateway import openai_developer_kit as opd, RactoPrompt
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
 
 prompt = RactoPrompt(
     role="You are a helpful assistant.",
@@ -446,17 +601,17 @@ prompt = RactoPrompt(
     tone="Friendly",
     output_format="text",
 )
-kit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt)
 
 async def main():
-    # Async chat
-    response = await kit.achat(opd.ChatConfig(user_message="What is SOLID?"))
+    # Async chat — returns LLMResponse
+    response = await kit.achat(gpt.ChatConfig(user_message="What is SOLID?"))
     print(response.content)
     # "SOLID is a set of five object-oriented design principles: Single Responsibility,
     #  Open/Closed, Liskov Substitution, Interface Segregation, and Dependency Inversion."
 
-    # Async streaming
-    async for chunk in kit.astream(opd.ChatConfig(user_message="Explain SOLID briefly")):
+    # Async streaming — yields StreamChunk
+    async for chunk in kit.astream(gpt.ChatConfig(user_message="Explain SOLID briefly")):
         print(chunk.delta.text, end="", flush=True)
         if chunk.is_final:
             print(f"\nDone. Tokens: {chunk.usage}")
@@ -471,21 +626,30 @@ asyncio.run(main())
 ### `EmbeddingConfig` — Input
 
 ```python
-config = opd.EmbeddingConfig(
-    texts=["Hello world", "Goodbye world"],   # required — list of strings
+config = gpt.EmbeddingConfig(
+    texts=["Hello world", "Goodbye world"],   # required — list of strings (min 1)
     model="text-embedding-3-large",            # optional (overrides kit default)
     dimensions=512,                            # optional — for models that support truncation
 )
 ```
 
+**`EmbeddingConfig` field reference:**
+
+| Field | Type | Required | Default | Description |
+| --- | --- | :---: | --- | --- |
+| `texts` | `list[str]` | Yes | — | List of strings to embed (minimum 1) |
+| `model` | `str \| None` | No | `None` | Override kit default embedding model |
+| `dimensions` | `int \| None` | No | `None` | Output dimensionality (for supported models) |
+| `extra` | `dict[str, Any]` | No | `{}` | Provider-specific pass-through kwargs |
+
 ### `EmbeddingResponse` — Output
 
 ```python
-from ractogateway import openai_developer_kit as opd
+from ractogateway import openai_developer_kit as gpt
 
-kit = opd.OpenAIDeveloperKit(model="gpt-4o", embedding_model="text-embedding-3-small")
+kit = gpt.Chat(model="gpt-4o", embedding_model="text-embedding-3-small")
 
-response = kit.embed(opd.EmbeddingConfig(texts=["cat", "dog", "automobile"]))
+response = kit.embed(gpt.EmbeddingConfig(texts=["cat", "dog", "automobile"]))
 
 print(response.model)
 # "text-embedding-3-small"
@@ -507,17 +671,18 @@ for v in response.vectors:
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `vectors` | `list[EmbeddingVector]` | One per input text |
-| `model` | `str` | Model used |
-| `usage` | `dict[str, int]` | Token usage |
+| `vectors` | `list[EmbeddingVector]` | One embedding per input text, in order |
+| `model` | `str` | The model used for embedding |
+| `usage` | `dict[str, int]` | `prompt_tokens`, `total_tokens` |
+| `raw` | `Any` | Unmodified provider response |
 
 **`EmbeddingVector` field reference:**
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `index` | `int` | Position in the input list |
+| `index` | `int` | 0-based position in the input `texts` list |
 | `text` | `str` | The original input text |
-| `embedding` | `list[float]` | The dense vector |
+| `embedding` | `list[float]` | The dense float vector |
 
 ---
 
@@ -525,7 +690,7 @@ for v in response.vectors:
 
 Define tools as plain Python functions — never write nested JSON dicts by hand. RactoGateway translates them into the correct format for each provider.
 
-### Register Tools with a Decorator
+### Register Tools with `@registry.register`
 
 ```python
 from ractogateway import ToolRegistry
@@ -552,10 +717,50 @@ def search_web(query: str, max_results: int = 3) -> list[str]:
     return [f"Result {i}: ..." for i in range(1, max_results + 1)]
 ```
 
+### Register Tools with the Standalone `@tool` Decorator
+
+```python
+from ractogateway import tool, ToolRegistry
+
+@tool
+def calculate_mortgage(
+    principal: float,
+    annual_rate: float,
+    years: int,
+) -> float:
+    """Calculate monthly mortgage payment.
+
+    :param principal: Loan amount in dollars
+    :param annual_rate: Annual interest rate as a decimal (e.g., 0.05 for 5%)
+    :param years: Loan term in years
+    """
+    monthly_rate = annual_rate / 12
+    n = years * 12
+    return principal * monthly_rate * (1 + monthly_rate) ** n / ((1 + monthly_rate) ** n - 1)
+
+# Then add the decorated function to a registry
+registry = ToolRegistry()
+registry.register(calculate_mortgage)
+```
+
+### Register Pydantic Models as Tools
+
+```python
+from pydantic import BaseModel, Field
+
+class SearchQuery(BaseModel):
+    """Search the knowledge base for relevant documents."""
+    query: str = Field(description="The search query string")
+    max_results: int = Field(default=5, description="Maximum results to return")
+    category: str = Field(default="all", description="Filter by category")
+
+registry.register(SearchQuery)
+```
+
 ### Use Tools with Any Kit
 
 ```python
-config = opd.ChatConfig(
+config = gpt.ChatConfig(
     user_message="What's the weather in Tokyo and in Paris?",
     tools=registry,
 )
@@ -585,19 +790,16 @@ print(result)
 # "Weather in Tokyo: 22°C, partly cloudy"
 ```
 
-### Register Pydantic Models as Tools
+### `ToolRegistry` Method Reference
 
-```python
-from pydantic import BaseModel, Field
-
-class SearchQuery(BaseModel):
-    """Search the knowledge base for relevant documents."""
-    query: str = Field(description="The search query string")
-    max_results: int = Field(default=5, description="Maximum results to return")
-    category: str = Field(default="all", description="Filter by category")
-
-registry.register(SearchQuery)
-```
+| Method / Property | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `register` | `(fn_or_model, name=None, description=None)` | `None` | Register a callable or Pydantic model as a tool |
+| `schemas` | (property) | `list[ToolSchema]` | All registered tool schemas |
+| `get_schema` | `(name: str)` | `ToolSchema \| None` | Look up a tool schema by name |
+| `get_callable` | `(name: str)` | `Callable \| None` | Retrieve the original registered function |
+| `__len__` | `len(registry)` | `int` | Total number of registered tools |
+| `__contains__` | `name in registry` | `bool` | Check whether a tool name is registered |
 
 ### `ToolCallResult` Field Reference
 
@@ -605,7 +807,21 @@ registry.register(SearchQuery)
 | --- | --- | --- |
 | `id` | `str` | Provider-assigned call ID |
 | `name` | `str` | Function name |
-| `arguments` | `dict[str, Any]` | Parsed argument dict |
+| `arguments` | `dict[str, Any]` | Parsed argument dict (ready to `**unpack`) |
+
+### `ToolSchema` — Internal Schema Representation
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `str` | Tool name |
+| `description` | `str` | Tool description |
+| `parameters` | `list[ParamSchema]` | List of parameter descriptors |
+
+**`ToolSchema` methods:**
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `to_json_schema()` | `dict[str, Any]` | Produce OpenAI-compatible JSON Schema for the parameters |
 
 ---
 
@@ -615,7 +831,7 @@ Force the LLM output into a specific Pydantic shape. If the model doesn't produc
 
 ```python
 from pydantic import BaseModel
-from ractogateway import openai_developer_kit as opd, RactoPrompt
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
 
 class SentimentResult(BaseModel):
     sentiment: str    # "positive", "negative", "neutral"
@@ -630,9 +846,9 @@ prompt = RactoPrompt(
     output_format=SentimentResult,
 )
 
-kit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt)
 
-config = opd.ChatConfig(
+config = gpt.ChatConfig(
     user_message="Analyze sentiment: 'This product is absolutely amazing!'",
     response_model=SentimentResult,
 )
@@ -658,7 +874,7 @@ print(result.reasoning)    # "Strong positive adjective 'amazing' with intensifi
 Pass `history` to maintain context across turns.
 
 ```python
-from ractogateway import openai_developer_kit as opd, RactoPrompt
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
 
 prompt = RactoPrompt(
     role="You are a helpful coding assistant.",
@@ -667,19 +883,19 @@ prompt = RactoPrompt(
     tone="Friendly and educational",
     output_format="text",
 )
-kit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt)
 
 # Turn 1
-r1 = kit.chat(opd.ChatConfig(user_message="Write a function to reverse a string in Python."))
+r1 = kit.chat(gpt.ChatConfig(user_message="Write a function to reverse a string in Python."))
 print(r1.content)
 # "def reverse_string(s: str) -> str:\n    return s[::-1]"
 
 # Turn 2 — pass history so the model remembers turn 1
-r2 = kit.chat(opd.ChatConfig(
+r2 = kit.chat(gpt.ChatConfig(
     user_message="Now make it handle None input gracefully.",
     history=[
-        opd.Message(role=opd.MessageRole.USER, content="Write a function to reverse a string in Python."),
-        opd.Message(role=opd.MessageRole.ASSISTANT, content=r1.content),
+        gpt.Message(role=gpt.MessageRole.USER, content="Write a function to reverse a string in Python."),
+        gpt.Message(role=gpt.MessageRole.ASSISTANT, content=r1.content),
     ],
 ))
 print(r2.content)
@@ -690,7 +906,7 @@ print(r2.content)
 
 ## Multimodal Attachments
 
-`RactoFile` lets you attach images, PDFs, plain-text files, and any binary file to a prompt. The attachment is automatically re-encoded into the format expected by the target provider.
+`RactoFile` lets you attach images, PDFs, plain-text files, and any binary file to a prompt. Use `prompt.to_messages()` to build provider-ready message lists that include the attachments in the correct format for each provider.
 
 ### Creating a `RactoFile`
 
@@ -712,6 +928,13 @@ resp = requests.get("https://example.com/diagram.png")
 diagram = RactoFile.from_bytes(resp.content, "image/png", name="diagram.png")
 ```
 
+**`RactoFile` constructor methods:**
+
+| Method | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `from_path` | `(path: str \| Path) -> RactoFile` | `RactoFile` | Load from file path; MIME auto-detected |
+| `from_bytes` | `(data: bytes, mime_type: str, name: str) -> RactoFile` | `RactoFile` | Create from raw bytes |
+
 **`RactoFile` property reference:**
 
 | Member | Type | Description |
@@ -724,10 +947,13 @@ diagram = RactoFile.from_bytes(resp.content, "image/png", name="diagram.png")
 | `is_pdf` | `bool` | `True` for `application/pdf` |
 | `is_text` | `bool` | `True` for any `text/*` MIME |
 
-### OpenAI Vision — End-to-End Example
+### Building Multimodal Message Lists
+
+Use `prompt.to_messages()` with the `attachments` parameter to build a multimodal message list, then pass it directly to the provider or low-level adapter:
 
 ```python
-from ractogateway import RactoPrompt, openai_developer_kit as opd
+from ractogateway import RactoPrompt, Gateway
+from ractogateway.adapters.openai_kit import OpenAILLMKit
 from ractogateway.prompts.engine import RactoFile
 
 prompt = RactoPrompt(
@@ -740,46 +966,23 @@ prompt = RactoPrompt(
     tone="Clear and concise",
     output_format="text",
 )
-kit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
 
-config = opd.ChatConfig(
-    user_message="What does this chart show?",
-    attachments=[RactoFile.from_path("sales_q4.png")],
+# Build multimodal messages using to_messages()
+attachment = RactoFile.from_path("sales_q4.png")
+messages = prompt.to_messages(
+    "What does this chart show?",
+    attachments=[attachment],
+    provider="openai",
 )
-response = kit.chat(config)
 
-print(response.content)
-# "The bar chart shows Q4 2024 sales figures across four regions.
-#  North America leads with $4.2M, followed by Europe at $3.1M.
-#  Asia-Pacific grew 18% quarter-over-quarter to reach $2.8M."
-```
-
-### Anthropic — Image + PDF Together
-
-```python
-from ractogateway import RactoPrompt, anthropic_developer_kit as anth
-from ractogateway.prompts.engine import RactoFile
-
-prompt = RactoPrompt(
-    role="You are a financial analyst.",
-    aim="Summarise the key financial metrics from the attached report and diagram.",
-    constraints=["Only extract facts present in the documents.", "Be concise."],
-    tone="Professional",
-    output_format="text",
-)
-kit = anth.AnthropicDeveloperKit(model="claude-sonnet-4-6", default_prompt=prompt)
-
-config = anth.ChatConfig(
-    user_message="Summarise the attached report and explain the chart.",
-    attachments=[
-        RactoFile.from_path("annual_report.pdf"),
-        RactoFile.from_path("revenue_chart.png"),
-    ],
-)
-response = kit.chat(config)
-print(response.content)
-# "The annual report shows revenue of $12.4M for FY2024, up 22% YoY.
-#  The chart illustrates steady monthly growth from January ($820K) to December ($1.4M)."
+# messages is now a list ready to send directly to the OpenAI API
+# [
+#   {"role": "system", "content": "<compiled RACTO prompt>"},
+#   {"role": "user", "content": [
+#       {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+#       {"type": "text", "text": "What does this chart show?"}
+#   ]}
+# ]
 ```
 
 ### Provider Content-Block Translation
@@ -787,6 +990,7 @@ print(response.content)
 Each provider receives a different content-block format — `to_messages()` handles it transparently.
 
 **OpenAI (`provider="openai"`)** — images become `image_url` blocks with inline data URIs:
+
 ```python
 [
     {"role": "system", "content": "<compiled RACTO system prompt>"},
@@ -804,6 +1008,7 @@ Each provider receives a different content-block format — `to_messages()` hand
 ```
 
 **Anthropic (`provider="anthropic"`)** — images become `image` blocks, PDFs become `document` blocks:
+
 ```python
 [
     {"role": "system", "content": "<compiled RACTO system prompt>"},
@@ -821,6 +1026,7 @@ Each provider receives a different content-block format — `to_messages()` hand
 ```
 
 **Google Gemini (`provider="google"`)** — files become `inline_data` parts:
+
 ```python
 [
     {"role": "system", "content": "<compiled RACTO system prompt>"},
@@ -848,14 +1054,73 @@ Each provider receives a different content-block format — `to_messages()` hand
 
 ---
 
+## Low-Level Gateway
+
+`Gateway` is a thin wrapper around any `BaseLLMAdapter`. Use it when you need direct access to prompt + adapter without the `ChatConfig` convenience layer — for example, when you want fine-grained control over individual calls.
+
+### Creating and Using a Gateway
+
+```python
+from ractogateway import RactoPrompt, Gateway, ToolRegistry
+from ractogateway.adapters.openai_kit import OpenAILLMKit
+
+adapter = OpenAILLMKit(model="gpt-4o", api_key="sk-...")
+prompt = RactoPrompt(
+    role="You are a code reviewer.",
+    aim="Identify bugs in the given code.",
+    constraints=["Report only real bugs.", "If no bugs, say so."],
+    tone="Concise",
+    output_format="json",
+)
+
+gw = Gateway(adapter=adapter, default_prompt=prompt)
+
+# Sync execution
+response = gw.run(user_message="Review: def div(a, b): return a / b")
+print(response.parsed)
+# {"bugs": ["ZeroDivisionError if b is 0"], "severity": "high"}
+
+# Async execution
+import asyncio
+async def main():
+    response = await gw.arun(user_message="Review: x = 1; del x; print(x)")
+    print(response.parsed)
+
+asyncio.run(main())
+```
+
+**`Gateway` constructor parameters:**
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | :---: | --- | --- |
+| `adapter` | `BaseLLMAdapter` | Yes | — | A concrete adapter (`OpenAILLMKit`, `GoogleLLMKit`, `AnthropicLLMKit`) |
+| `tools` | `ToolRegistry \| None` | No | `None` | Default tool registry for all calls |
+| `default_prompt` | `RactoPrompt \| None` | No | `None` | Fallback prompt when `run()` is called without one |
+
+**`Gateway.run()` and `Gateway.arun()` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `prompt` | `RactoPrompt \| None` | `None` | Override `default_prompt` for this call |
+| `user_message` | `str` | `""` | The end-user's query |
+| `tools` | `ToolRegistry \| None` | `None` | Override gateway-level tool registry |
+| `temperature` | `float` | `0.0` | Sampling temperature |
+| `max_tokens` | `int` | `4096` | Maximum response tokens |
+| `response_model` | `type[BaseModel] \| None` | `None` | Validate JSON output against this Pydantic model |
+| `**kwargs` | `Any` | — | Passed through to the adapter |
+
+**Returns:** `LLMResponse`
+
+---
+
 ## Switching Providers
 
 Same `ChatConfig`, different kit. Zero code changes to your prompt or config.
 
 ```python
-from ractogateway import openai_developer_kit as opd
-from ractogateway import google_developer_kit as god
-from ractogateway import anthropic_developer_kit as anth
+from ractogateway import openai_developer_kit as gpt
+from ractogateway import google_developer_kit as gemini
+from ractogateway import anthropic_developer_kit as claude
 from ractogateway import RactoPrompt
 
 prompt = RactoPrompt(
@@ -866,22 +1131,22 @@ prompt = RactoPrompt(
     output_format="text",
 )
 
-config = opd.ChatConfig(user_message="What is quantum computing?")
+config = gpt.ChatConfig(user_message="What is quantum computing?")
 
-# OpenAI
-okit = opd.OpenAIDeveloperKit(model="gpt-4o", default_prompt=prompt)
-print(okit.chat(config).content)
+# OpenAI — use "gpt" alias
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt)
+print(kit.chat(config).content)
 # "Quantum computing uses quantum bits (qubits) that can exist in superposition,
 #  enabling calculations that classical computers cannot do efficiently..."
 
-# Google Gemini
-gkit = god.GoogleDeveloperKit(model="gemini-2.0-flash", default_prompt=prompt)
-print(gkit.chat(config).content)
+# Google Gemini — swap to "gemini" alias, everything else stays the same!
+kit = gemini.Chat(model="gemini-2.0-flash", default_prompt=prompt)
+print(kit.chat(config).content)
 # "Quantum computing harnesses the principles of quantum mechanics..."
 
-# Anthropic Claude
-akit = anth.AnthropicDeveloperKit(model="claude-sonnet-4-6", default_prompt=prompt)
-print(akit.chat(config).content)
+# Anthropic Claude — swap to "claude" alias, that's it!
+kit = claude.Chat(model="claude-sonnet-4-6", default_prompt=prompt)
+print(kit.chat(config).content)
 # "Quantum computing is a type of computation that leverages quantum phenomena..."
 ```
 
@@ -912,6 +1177,37 @@ from ractogateway import (
 | `OpenAIFineTuner` | Upload → create job → poll on OpenAI |
 | `GeminiFineTuner` | Create tuning job → poll on Google AI |
 | `AnthropicFineTuner` | Upload → create job → poll on Anthropic |
+
+### `RactoTrainingMessage` Field Reference
+
+| Field | Type | Required | Description |
+| --- | --- | :---: | --- |
+| `role` | `str` | Yes | `"system"`, `"user"`, or `"assistant"` |
+| `content` | `str` | Yes | Text content of the message |
+| `attachments` | `list[RactoFile]` | No | Optional multimodal file attachments |
+
+**`RactoTrainingMessage` serialization methods:**
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `to_openai()` | `dict` | Serialize to OpenAI message format |
+| `to_anthropic()` | `dict` | Serialize to Anthropic message format |
+| `to_gemini_parts()` | `list` | Serialize to Gemini content parts |
+
+### `RactoTrainingExample` Factory Methods
+
+| Factory Method | Signature | Description |
+| --- | --- | --- |
+| `from_pair` | `(user, assistant, system="", user_attachments=None)` | Single-turn from strings |
+| `from_conversation` | `([(role, content), ...])` | Multi-turn from list of tuples |
+
+**`RactoTrainingExample` serialization methods:**
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `to_openai_dict()` | `dict` | OpenAI fine-tuning format |
+| `to_anthropic_dict()` | `dict` | Anthropic fine-tuning format |
+| `to_gemini_dict()` | `dict` | Gemini fine-tuning format |
 
 ### Step 1 — Build a Dataset
 
@@ -1004,22 +1300,26 @@ train_ds.export_jsonl("train_gem.jsonl", provider="gemini",    overwrite=True)
 ```
 
 **OpenAI JSONL format** (`train.jsonl`):
+
 ```json
 {"messages": [{"role": "system", "content": "You are a Python tutor."}, {"role": "user", "content": "What is a list?"}, {"role": "assistant", "content": "An ordered, mutable sequence."}]}
 {"messages": [{"role": "system", "content": "You are a Python tutor."}, {"role": "user", "content": "What is a dict?"}, {"role": "assistant", "content": "A key-value mapping."}]}
 ```
 
 **Anthropic JSONL format** (`train_ant.jsonl`):
+
 ```json
 {"system": "You are a Python tutor.", "messages": [{"role": "user", "content": "What is a list?"}, {"role": "assistant", "content": "An ordered, mutable sequence."}]}
 ```
 
 **Gemini JSONL format** (`train_gem.jsonl`):
+
 ```json
 {"text_input": "What is a list?", "output": "An ordered, mutable sequence."}
 ```
 
 **OpenAI multimodal format** (image in user turn):
+
 ```json
 {
   "messages": [
@@ -1060,9 +1360,9 @@ fine_tuned_model = tuner.run_pipeline(
 # [OpenAIFineTuner] Done!  Fine-tuned model: ft:gpt-4o-mini-2024-07-18:org::python-tutor-abc
 
 # Use immediately
-from ractogateway import openai_developer_kit as opd
-kit = opd.OpenAIDeveloperKit(model=fine_tuned_model)
-response = kit.chat(opd.ChatConfig(user_message="What is a generator?"))
+from ractogateway import openai_developer_kit as gpt
+kit = gpt.Chat(model=fine_tuned_model)
+response = kit.chat(gpt.ChatConfig(user_message="What is a generator?"))
 print(response.content)
 # "A generator is a function that uses yield to produce values lazily, one at a time."
 ```
@@ -1092,6 +1392,17 @@ for event in tuner.list_events(job_id, limit=10):
 fine_tuned_model = tuner.wait_for_completion(job_id, poll_interval=30)
 ```
 
+**`OpenAIFineTuner` method reference:**
+
+| Method | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `run_pipeline` | `(train_ds, model, validation_dataset=None, n_epochs=3, suffix="", verbose=False)` | `str` | Full pipeline — upload, create job, wait, return model name |
+| `upload_dataset` | `(ds: RactoDataset)` | `str` | Upload dataset, return file ID |
+| `create_job` | `(train_file_id, model, validation_file=None, n_epochs=3, suffix="")` | `str` | Create fine-tune job, return job ID |
+| `get_status` | `(job_id: str)` | `dict` | Get current job status |
+| `list_events` | `(job_id: str, limit=10)` | `list[dict]` | Get recent job events |
+| `wait_for_completion` | `(job_id: str, poll_interval=30)` | `str` | Poll until done, return fine-tuned model name |
+
 #### Google Gemini — one call
 
 ```python
@@ -1111,8 +1422,8 @@ tuned_model = tuner.run_pipeline(
 # [GeminiFineTuner] State: CREATING (12%)
 # [GeminiFineTuner] Done!  Tuned model: tunedModels/python-tutor-abc123
 
-from ractogateway import google_developer_kit as god
-kit = god.GoogleDeveloperKit(model=tuned_model)
+from ractogateway import google_developer_kit as gemini
+kit = gemini.Chat(model=tuned_model)
 ```
 
 #### Anthropic Claude — one call
@@ -1138,18 +1449,18 @@ fine_tuned_model = tuner.run_pipeline(
 
 ### `RactoDataset` API Reference
 
-| Member | Description |
-| --- | --- |
-| `RactoDataset.from_pairs(pairs, system)` | Build from `(user, assistant)` text tuples |
-| `RactoDataset.from_jsonl(path, provider)` | Load a previously exported JSONL file |
-| `.add(example)` | Append one `RactoTrainingExample` |
-| `.extend(examples)` | Append a list of examples |
-| `.validate(provider)` | Returns `list[str]` of errors (empty = valid) |
-| `.split(train_ratio, seed)` | Returns `(train_ds, val_ds)` |
-| `.shuffle(seed)` | Returns a new shuffled dataset |
-| `.export_jsonl(path, provider, overwrite)` | Write to `.jsonl` on disk |
-| `.to_jsonl_string(provider)` | Return JSONL as a `str` (no I/O) |
-| `.summary()` | Dict: `examples`, `total_messages`, `multimodal_examples`, … |
+| Member | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `RactoDataset.from_pairs` | `(pairs, system="")` | `RactoDataset` | Build from `[(user, assistant)]` text tuples |
+| `RactoDataset.from_jsonl` | `(path, provider="openai")` | `RactoDataset` | Load a previously exported JSONL file |
+| `.add` | `(example: RactoTrainingExample)` | `None` | Append one example |
+| `.extend` | `(examples: list)` | `None` | Append a list of examples |
+| `.validate` | `(provider: str)` | `list[str]` | Returns list of errors (empty = valid) |
+| `.split` | `(train_ratio=0.8, seed=42)` | `(RactoDataset, RactoDataset)` | Reproducible train/val split |
+| `.shuffle` | `(seed: int)` | `RactoDataset` | Returns a new shuffled dataset |
+| `.export_jsonl` | `(path, provider, overwrite=True)` | `None` | Write to `.jsonl` file on disk |
+| `.to_jsonl_string` | `(provider: str)` | `str` | Return JSONL as a string (no I/O) |
+| `.summary` | `()` | `dict` | Stats: `examples`, `total_messages`, `multimodal_examples`, … |
 
 ### Provider Fine-Tuning Support Matrix
 
@@ -1168,13 +1479,13 @@ fine_tuned_model = tuner.run_pipeline(
 
 RactoGateway ships a full Retrieval-Augmented Generation (RAG) pipeline. In plain English: you feed it documents, it breaks them into chunks, converts them to number vectors, stores them, and later retrieves the most relevant chunks to answer a question — all in one class.
 
-```
+```text
 Document → Read → Chunk → Process → Embed → Store
                                               ↓
                               Query → Embed → Retrieve → Generate → Answer
 ```
 
-### Installation
+### RAG Installation
 
 ```bash
 pip install ractogateway[rag-all]    # everything
@@ -1187,12 +1498,12 @@ pip install ractogateway[rag-chroma] # ChromaDB
 ### Quickstart — 4 Lines
 
 ```python
-from ractogateway import openai_developer_kit as opd
+from ractogateway import openai_developer_kit as gpt
 from ractogateway.rag.pipeline import RactoRAG
 from ractogateway.rag.embedders import OpenAIEmbedder
 from ractogateway.rag.stores import InMemoryVectorStore
 
-kit = opd.OpenAIDeveloperKit(model="gpt-4o")
+kit = gpt.Chat(model="gpt-4o")
 rag = RactoRAG(
     vector_store=InMemoryVectorStore(),
     embedder=OpenAIEmbedder(),
@@ -1204,6 +1515,21 @@ print(response.answer.content)
 # "The key findings were: (1) revenue increased 22% YoY, (2) customer churn
 #  dropped by 4 percentage points, (3) the APAC region became the fastest-growing market."
 ```
+
+### `RactoRAG` Constructor Parameters
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | :---: | --- | --- |
+| `vector_store` | `BaseVectorStore` | Yes | — | Where chunks are indexed and searched |
+| `embedder` | `BaseEmbedder` | Yes | — | Converts text to float vectors |
+| `chunker` | `BaseChunker \| None` | No | `RecursiveChunker(512, 50)` | How documents are split |
+| `processors` | `list[BaseProcessor] \| None` | No | `[TextCleaner()]` | Text cleaning pipeline |
+| `llm_kit` | `Any \| None` | No* | `None` | Required for `.query()` / `.aquery()` |
+| `context_template` | `str \| None` | No | Built-in | Template for injecting context into the LLM |
+| `reader_registry` | `FileReaderRegistry \| None` | No | Built-in | Dispatches files to the correct reader |
+| `default_prompt` | `RactoPrompt \| None` | No | Built-in RAG prompt | System prompt used during generation |
+
+> \* `llm_kit` is optional at construction time but required when calling `.query()` or `.aquery()`.
 
 ### Ingesting Documents
 
@@ -1251,6 +1577,69 @@ chunks = await rag.aingest_dir("./docs/")
 chunks = await rag.aingest_text("some text", source="api")
 ```
 
+**`ingest()` / `aingest()` parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `str \| Path` | File path to ingest |
+| `**metadata` | `Any` | Extra key-value pairs stored in `ChunkMetadata.extra` |
+
+**Returns:** `list[Chunk]`
+
+**`ingest_dir()` / `aingest_dir()` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `directory` | `str \| Path` | — | Directory to walk |
+| `pattern` | `str` | `"**/*"` | Glob pattern to filter files |
+| `**metadata` | `Any` | — | Extra metadata attached to all chunks |
+
+**Returns:** `list[Chunk]`
+
+**`ingest_text()` / `aingest_text()` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `text` | `str` | — | Raw text content to ingest |
+| `source` | `str` | `"manual"` | Label for this text source |
+| `**metadata` | `Any` | — | Extra metadata attached to all chunks |
+
+**Returns:** `list[Chunk]`
+
+### RAG Data Models
+
+**`Document` field reference:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `doc_id` | `str` | Auto-generated UUID for this document |
+| `content` | `str` | Full extracted text content |
+| `source` | `str` | File path, URL, or caller-supplied label |
+| `metadata` | `dict[str, Any]` | Arbitrary metadata dict |
+
+**`Chunk` field reference:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `chunk_id` | `str` | Auto-generated UUID for this chunk |
+| `doc_id` | `str` | UUID of the parent `Document` |
+| `content` | `str` | Text content of this chunk |
+| `embedding` | `list[float] \| None` | Dense float vector (`None` until embedded) |
+| `metadata` | `ChunkMetadata` | Provenance info for this chunk |
+
+**`ChunkMetadata` field reference:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `source` | `str` | File path or URL |
+| `page` | `int \| None` | Page number for PDFs (1-based), else `None` |
+| `chunk_index` | `int` | 0-based position within the parent document |
+| `total_chunks` | `int` | Total chunks created from the parent document |
+| `start_char` | `int` | Character offset where this chunk starts |
+| `end_char` | `int` | Character offset where this chunk ends |
+| `doc_id` | `str` | UUID of the parent document |
+| `extra` | `dict[str, Any]` | Caller-supplied metadata (from `ingest(**metadata)`) |
+
 ### Retrieving Without Generating
 
 ```python
@@ -1271,36 +1660,23 @@ for r in results:
 #   The APAC region contributed most significantly to revenue growth, with...
 ```
 
+**`retrieve()` / `aretrieve()` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `query` | `str` | — | The search query text |
+| `top_k` | `int` | `5` | Maximum number of results to return |
+| `filters` | `dict \| None` | `None` | Metadata filters (store-specific) |
+
+**Returns:** `list[RetrievalResult]`
+
 **`RetrievalResult` field reference:**
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `chunk` | `Chunk` | The retrieved text chunk |
 | `score` | `float` | Similarity score (higher = more relevant) |
-| `rank` | `int` | 1-based rank |
-
-**`Chunk` field reference:**
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `chunk_id` | `str` | UUID of this chunk |
-| `doc_id` | `str` | UUID of the parent document |
-| `content` | `str` | Text content |
-| `embedding` | `list[float] \| None` | Dense embedding vector |
-| `metadata` | `ChunkMetadata` | Provenance info |
-
-**`ChunkMetadata` field reference:**
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `source` | `str` | File path or URL |
-| `page` | `int \| None` | Page number for PDFs |
-| `chunk_index` | `int` | 0-based chunk position |
-| `total_chunks` | `int` | Total chunks in the document |
-| `start_char` | `int` | Character offset (start) |
-| `end_char` | `int` | Character offset (end) |
-| `doc_id` | `str` | Parent document UUID |
-| `extra` | `dict` | Caller-supplied metadata |
+| `rank` | `int` | 1-based rank (1 = most relevant) |
 
 ### Full RAG Query — Retrieve + Generate
 
@@ -1333,12 +1709,25 @@ for r in rag_response.sources:
 # [5] score=0.741 → EMEA recorded moderate growth of 9% year-over-year...
 ```
 
+**`query()` / `aquery()` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `question` | `str` | — | The user's question (required) |
+| `top_k` | `int` | `5` | Chunks to retrieve and inject as context |
+| `filters` | `dict \| None` | `None` | Metadata filters (store-specific) |
+| `prompt` | `RactoPrompt \| None` | `None` | Override default RAG prompt |
+| `temperature` | `float` | `0.0` | Sampling temperature for generation |
+| `max_tokens` | `int` | `2048` | Maximum tokens in the generated answer |
+
+**Returns:** `RAGResponse`
+
 **`RAGResponse` field reference:**
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `answer` | `LLMResponse` | The generated answer (same as a normal `chat()` response) |
-| `sources` | `list[RetrievalResult]` | Chunks used as context |
+| `sources` | `list[RetrievalResult]` | Chunks used as context for generation |
 | `query` | `str` | The original question |
 | `context_used` | `str` | Verbatim context string injected into the LLM |
 
@@ -1377,14 +1766,39 @@ rag = RactoRAG(
     llm_kit=kit,
 )
 
-# Sentence — natural boundaries
+# Sentence — split on natural sentence boundaries
 rag = RactoRAG(
     vector_store=InMemoryVectorStore(),
     embedder=OpenAIEmbedder(),
     chunker=SentenceChunker(max_sentences=5),
     llm_kit=kit,
 )
+
+# Semantic — split where meaning changes (requires an embedder reference)
+from ractogateway.rag.chunkers import SemanticChunker
+embedder = OpenAIEmbedder()
+rag = RactoRAG(
+    vector_store=InMemoryVectorStore(),
+    embedder=embedder,
+    chunker=SemanticChunker(embedder=embedder, threshold=0.8),
+    llm_kit=kit,
+)
 ```
+
+**Chunker parameter reference:**
+
+| Chunker | Key Parameters | Description |
+| --- | --- | --- |
+| `FixedChunker` | `chunk_size=256`, `overlap=32` | Split at exactly `chunk_size` characters with `overlap` overlap |
+| `RecursiveChunker` | `chunk_size=512`, `overlap=50` | Hierarchical: paragraphs → sentences → words |
+| `SentenceChunker` | `max_sentences=5` | Split every `max_sentences` sentence boundaries |
+| `SemanticChunker` | `embedder`, `threshold=0.8` | Split where cosine similarity drops below `threshold` |
+
+**`BaseChunker` interface:**
+
+| Method | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `chunk` | `(document: Document) -> list[Chunk]` | `list[Chunk]` | Split a document into chunks |
 
 ### RAG — Embedders
 
@@ -1409,6 +1823,14 @@ embedder = VoyageEmbedder(
     api_key="pa-...",
 )
 ```
+
+**`BaseEmbedder` interface:**
+
+| Method / Property | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `dimension` | (property) | `int` | Embedding dimension size (`-1` if unknown before first call) |
+| `embed` | `(texts: list[str]) -> list[list[float]]` | `list[list[float]]` | Synchronous batch embedding |
+| `aembed` | `(texts: list[str]) -> list[list[float]]` | `list[list[float]]` | Async batch embedding |
 
 ### RAG — Vector Stores
 
@@ -1443,6 +1865,16 @@ store = QdrantStore(collection="my_docs", url="http://localhost:6333")
 store = PGVectorStore(connection_string="postgresql://user:pass@localhost/db", table="embeddings")
 ```
 
+**`BaseVectorStore` interface:**
+
+| Method | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `add` | `(chunks: list[Chunk]) -> None` | `None` | Index chunks (must have embeddings set) |
+| `search` | `(embedding: list[float], top_k=5, filters=None) -> list[RetrievalResult]` | `list[RetrievalResult]` | Find most similar chunks |
+| `delete` | `(chunk_ids: list[str]) -> None` | `None` | Remove chunks by ID |
+| `clear` | `() -> None` | `None` | Remove all indexed chunks |
+| `count` | `() -> int` | `int` | Total indexed chunk count |
+
 ### RAG — Readers
 
 Documents are loaded automatically based on file extension:
@@ -1455,6 +1887,41 @@ Documents are loaded automatically based on file extension:
 | `WordReader` | `.docx` | `ractogateway[rag-word]` |
 | `SpreadsheetReader` | `.xlsx`, `.xls` | `ractogateway[rag-excel]` |
 | `ImageReader` | `.jpg`, `.jpeg`, `.png`, `.gif` | `ractogateway[rag-image]` |
+
+**`BaseReader` interface:**
+
+| Method / Property | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `supported_extensions` | (property) | `frozenset[str]` | File extensions this reader handles |
+| `read` | `(path: Path) -> Document` | `Document` | Load a file and return a `Document` |
+
+### RAG — File Reader Registry
+
+`FileReaderRegistry` auto-dispatches file reads to the correct reader based on extension.
+
+```python
+from ractogateway import FileReaderRegistry
+from ractogateway.rag.readers import TextReader, PdfReader
+
+# The registry used by RactoRAG is built-in (auto-registers all available readers)
+# You can also create a custom one:
+registry = FileReaderRegistry()
+registry.register(TextReader())     # manually register a reader
+registry.register(PdfReader())
+
+# Read a file — dispatches automatically
+doc = registry.read("report.pdf")  # → Document
+print(doc.content)                  # extracted text
+print(doc.source)                   # "report.pdf"
+```
+
+**`FileReaderRegistry` method reference:**
+
+| Method | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `register` | `(reader: BaseReader) -> None` | `None` | Add a reader for its `supported_extensions` |
+| `read` | `(path: str \| Path) -> Document` | `Document` | Auto-dispatch to the matching reader |
+| `can_read` | `(path: str \| Path) -> bool` | `bool` | Check if any reader handles this extension |
 
 ### RAG — Processing Pipeline
 
@@ -1472,12 +1939,30 @@ rag = RactoRAG(
     ],
     llm_kit=kit,
 )
+
+# ProcessingPipeline chains multiple processors manually
+pipeline = ProcessingPipeline([TextCleaner(), Lemmatizer()])
+cleaned_text = pipeline.process("  Running   quickly through the fields...  ")
+# "run quickly through the field"
 ```
+
+**`BaseProcessor` interface:**
+
+| Method | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `process` | `(text: str) -> str` | `str` | Transform text and return cleaned result |
+
+**`ProcessingPipeline` — chains processors:**
+
+| Method | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `__init__` | `(processors: list[BaseProcessor])` | — | Build the pipeline |
+| `process` | `(text: str) -> str` | `str` | Run text through all processors in order |
 
 ### Full RAG Pipeline Example — Production Setup
 
 ```python
-from ractogateway import openai_developer_kit as opd, RactoPrompt
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
 from ractogateway.rag.pipeline import RactoRAG
 from ractogateway.rag.embedders import OpenAIEmbedder
 from ractogateway.rag.stores import ChromaStore
@@ -1485,7 +1970,7 @@ from ractogateway.rag.chunkers import RecursiveChunker
 from ractogateway.rag.processors import TextCleaner
 
 # 1. Build the kit
-kit = opd.OpenAIDeveloperKit(model="gpt-4o")
+kit = gpt.Chat(model="gpt-4o")
 
 # 2. Custom RAG prompt
 rag_prompt = RactoPrompt(
@@ -1538,22 +2023,22 @@ for r in response.sources:
 
 ### `RactoRAG` Method Reference
 
-| Method | Description |
-| --- | --- |
-| `ingest(path, **metadata)` | Read, chunk, embed, and store a file → `list[Chunk]` |
-| `ingest_dir(directory, pattern, **metadata)` | Recursively ingest all supported files → `list[Chunk]` |
-| `ingest_text(text, source, **metadata)` | Ingest raw text directly → `list[Chunk]` |
-| `aingest(path, **metadata)` | Async variant of `ingest` |
-| `aingest_dir(directory, pattern, **metadata)` | Async variant of `ingest_dir` |
-| `aingest_text(text, source, **metadata)` | Async variant of `ingest_text` |
-| `retrieve(query, top_k, filters)` | Embed query and return top-k chunks → `list[RetrievalResult]` |
-| `aretrieve(query, top_k, filters)` | Async variant of `retrieve` |
-| `query(question, top_k, filters, prompt, temperature, max_tokens)` | Retrieve + generate → `RAGResponse` |
-| `aquery(...)` | Async variant of `query` |
-| `count()` | Total indexed chunks → `int` |
-| `clear()` | Remove all indexed chunks |
-| `store` | Access the underlying `BaseVectorStore` |
-| `embedder` | Access the underlying `BaseEmbedder` |
+| Method | Signature | Returns | Description |
+| --- | --- | --- | --- |
+| `ingest` | `(path, **metadata)` | `list[Chunk]` | Read, chunk, embed, and store a file |
+| `ingest_dir` | `(directory, pattern="**/*", **metadata)` | `list[Chunk]` | Recursively ingest all supported files |
+| `ingest_text` | `(text, source="manual", **metadata)` | `list[Chunk]` | Ingest raw text directly |
+| `aingest` | `(path, **metadata)` | `list[Chunk]` | Async variant of `ingest` |
+| `aingest_dir` | `(directory, pattern, **metadata)` | `list[Chunk]` | Async variant of `ingest_dir` |
+| `aingest_text` | `(text, source, **metadata)` | `list[Chunk]` | Async variant of `ingest_text` |
+| `retrieve` | `(query, top_k=5, filters=None)` | `list[RetrievalResult]` | Embed query and return top-k chunks |
+| `aretrieve` | `(query, top_k=5, filters=None)` | `list[RetrievalResult]` | Async variant of `retrieve` |
+| `query` | `(question, top_k=5, filters=None, prompt=None, temperature=0.0, max_tokens=2048)` | `RAGResponse` | Retrieve + generate → full RAG answer |
+| `aquery` | `(...)` | `RAGResponse` | Async variant of `query` |
+| `count` | `()` | `int` | Total indexed chunks |
+| `clear` | `()` | `None` | Remove all indexed chunks |
+| `store` | (property) | `BaseVectorStore` | Access the underlying vector store |
+| `embedder` | (property) | `BaseEmbedder` | Access the underlying embedder |
 
 ---
 
@@ -1561,7 +2046,7 @@ for r in response.sources:
 
 ```text
 src/ractogateway/
-├── __init__.py                          # Top-level: RactoPrompt, ToolRegistry, kits
+├── __init__.py                          # Top-level: RactoPrompt, ToolRegistry, kits, RAG, fine-tuning
 ├── py.typed                             # PEP 561 typed package marker
 │
 ├── _models/                             # Shared Pydantic input/output models
@@ -1579,27 +2064,30 @@ src/ractogateway/
 │   └── anthropic_tuner.py               #   AnthropicFineTuner
 │
 ├── tools/                               # Tool Registry
-│   └── registry.py                      #   @tool decorator, ToolRegistry, ToolSchema
+│   └── registry.py                      #   @tool decorator, ToolRegistry, ToolSchema, ParamSchema
+│
+├── gateway/                             # Low-Level Gateway
+│   └── runner.py                        #   Gateway (wraps any BaseLLMAdapter)
 │
 ├── adapters/                            # Internal provider adapters (Adapter Pattern)
-│   ├── base.py                          #   BaseLLMAdapter ABC, LLMResponse, FinishReason
+│   ├── base.py                          #   BaseLLMAdapter ABC, LLMResponse, FinishReason, ToolCallResult
 │   ├── openai_kit.py                    #   OpenAILLMKit
 │   ├── google_kit.py                    #   GoogleLLMKit
 │   └── anthropic_kit.py                 #   AnthropicLLMKit
 │
-├── openai_developer_kit/                # OpenAI Developer Kit (import as opd)
-│   └── kit.py                           #   OpenAIDeveloperKit
+├── openai_developer_kit/                # OpenAI Developer Kit (import as gpt)
+│   └── kit.py                           #   OpenAIDeveloperKit (Chat alias)
 │
-├── google_developer_kit/                # Google Developer Kit (import as god)
-│   └── kit.py                           #   GoogleDeveloperKit
+├── google_developer_kit/                # Google Developer Kit (import as gemini)
+│   └── kit.py                           #   GoogleDeveloperKit (Chat alias)
 │
-├── anthropic_developer_kit/             # Anthropic Developer Kit (import as anth)
-│   └── kit.py                           #   AnthropicDeveloperKit
+├── anthropic_developer_kit/             # Anthropic Developer Kit (import as claude)
+│   └── kit.py                           #   AnthropicDeveloperKit (Chat alias)
 │
 └── rag/                                 # RAG Pipeline
     ├── pipeline.py                      #   RactoRAG
     ├── _models/                         #   Document, Chunk, ChunkMetadata, RetrievalResult, RAGResponse
-    ├── readers/                         #   TextReader, PdfReader, WordReader, SpreadsheetReader, ImageReader, HtmlReader
+    ├── readers/                         #   TextReader, HtmlReader, PdfReader, WordReader, SpreadsheetReader, ImageReader, FileReaderRegistry
     ├── chunkers/                        #   FixedChunker, RecursiveChunker, SentenceChunker, SemanticChunker
     ├── processors/                      #   TextCleaner, Lemmatizer, ProcessingPipeline
     ├── embedders/                       #   OpenAIEmbedder, GoogleEmbedder, VoyageEmbedder
@@ -1613,6 +2101,7 @@ src/ractogateway/
 - **Composition over inheritance** — Developer kits compose internal adapters rather than extending them, keeping the public API clean.
 - **Sync + async parity** — Every method has both a synchronous and asynchronous variant.
 - **Provider-agnostic tool schemas** — Define tools once, use them with any provider. Internal adapters handle the translation.
+- **Auto-JSON parsing** — Response content is automatically stripped of markdown code fences and JSON is parsed — no `json.loads()` needed.
 
 ---
 
