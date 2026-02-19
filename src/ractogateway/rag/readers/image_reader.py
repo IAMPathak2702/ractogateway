@@ -62,10 +62,18 @@ class ImageReader(BaseReader):
 
     @property
     def supported_extensions(self) -> frozenset[str]:
-        return frozenset({
-            ".png", ".jpg", ".jpeg", ".webp",
-            ".gif", ".bmp", ".tiff", ".tif",
-        })
+        return frozenset(
+            {
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".webp",
+                ".gif",
+                ".bmp",
+                ".tiff",
+                ".tif",
+            }
+        )
 
     def read(self, path: Path) -> Document:
         Image = _require_pillow()

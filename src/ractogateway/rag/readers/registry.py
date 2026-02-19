@@ -39,7 +39,7 @@ class FileReaderRegistry:
 
     def __init__(self, readers: list[BaseReader] | None = None) -> None:
         self._map: dict[str, BaseReader] = {}
-        for reader in (readers or _default_readers()):
+        for reader in readers or _default_readers():
             self.register(reader)
 
     def register(self, reader: BaseReader) -> None:
@@ -60,8 +60,7 @@ class FileReaderRegistry:
         if reader is None:
             supported = sorted(self._map.keys())
             raise ValueError(
-                f"No reader registered for extension '{ext}'. "
-                f"Supported extensions: {supported}"
+                f"No reader registered for extension '{ext}'. Supported extensions: {supported}"
             )
         return reader
 

@@ -37,7 +37,9 @@ class InMemoryVectorStore(BaseVectorStore):
 
     def __init__(self, similarity: str = "cosine") -> None:
         if similarity != "cosine":
-            raise ValueError(f"Unsupported similarity: {similarity!r}. Only 'cosine' is supported.")
+            raise ValueError(
+                f"Unsupported similarity: {similarity!r}. Only 'cosine' is supported."
+            )
         self._chunks: list[Chunk] = []
 
     def add(self, chunks: list[Chunk]) -> None:
@@ -53,7 +55,8 @@ class InMemoryVectorStore(BaseVectorStore):
         candidates = self._chunks
         if filters:
             candidates = [
-                c for c in candidates
+                c
+                for c in candidates
                 if all(
                     c.metadata.extra.get(k) == v or getattr(c.metadata, k, None) == v
                     for k, v in filters.items()

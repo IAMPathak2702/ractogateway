@@ -107,7 +107,9 @@ class RactoRAG:
         self._store = vector_store
         self._embedder = embedder
         self._chunker = chunker or RecursiveChunker(chunk_size=512, overlap=50)
-        self._processors: list[BaseProcessor] = processors if processors is not None else [TextCleaner()]
+        self._processors: list[BaseProcessor] = (
+            processors if processors is not None else [TextCleaner()]
+        )
         self._llm_kit = llm_kit
         self._context_template = context_template or _DEFAULT_CONTEXT_TEMPLATE
         self._reader_registry = reader_registry or FileReaderRegistry()
@@ -419,16 +421,14 @@ class RactoRAG:
         texts = [c.content for c in chunks]
         embeddings = self._embedder.embed(texts)
         return [
-            chunk.model_copy(update={"embedding": emb})
-            for chunk, emb in zip(chunks, embeddings)
+            chunk.model_copy(update={"embedding": emb}) for chunk, emb in zip(chunks, embeddings)
         ]
 
     async def _aembed_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
         texts = [c.content for c in chunks]
         embeddings = await self._embedder.aembed(texts)
         return [
-            chunk.model_copy(update={"embedding": emb})
-            for chunk, emb in zip(chunks, embeddings)
+            chunk.model_copy(update={"embedding": emb}) for chunk, emb in zip(chunks, embeddings)
         ]
 
     def _build_context(self, results: list[RetrievalResult]) -> str:
@@ -437,9 +437,7 @@ class RactoRAG:
             source = result.chunk.metadata.source
             page = result.chunk.metadata.page
             loc = f" (page {page})" if page else ""
-            parts.append(
-                f"[{i}] Source: {source}{loc}\n{result.chunk.content}"
-            )
+            parts.append(f"[{i}] Source: {source}{loc}\n{result.chunk.content}")
         return "\n\n".join(parts)
 
     def _require_llm_kit(self) -> Any:

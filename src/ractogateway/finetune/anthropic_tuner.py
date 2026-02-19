@@ -241,8 +241,7 @@ class AnthropicFineTuner:
         if status["status"] not in ("succeeded", "completed"):
             error = status.get("error") or "Unknown error"
             raise RuntimeError(
-                f"Fine-tuning job {job_id} ended with status "
-                f"'{status['status']}': {error}"
+                f"Fine-tuning job {job_id} ended with status '{status['status']}': {error}"
             )
         return status["fine_tuned_model"] or job_id
 
@@ -295,9 +294,7 @@ class AnthropicFineTuner:
         """
         errors = dataset.validate("anthropic")
         if errors:
-            raise ValueError(
-                "Dataset validation failed:\n" + "\n".join(errors)
-            )
+            raise ValueError("Dataset validation failed:\n" + "\n".join(errors))
 
         if verbose:
             stats = dataset.summary()
@@ -334,7 +331,5 @@ class AnthropicFineTuner:
             job_id, poll_interval=poll_interval, verbose=verbose
         )
         if verbose:
-            print(
-                f"[AnthropicFineTuner] Done!  Fine-tuned model: {fine_tuned_model}"
-            )
+            print(f"[AnthropicFineTuner] Done!  Fine-tuned model: {fine_tuned_model}")
         return fine_tuned_model

@@ -24,11 +24,24 @@ class TextReader(BaseReader):
 
     @property
     def supported_extensions(self) -> frozenset[str]:
-        return frozenset({
-            ".txt", ".md", ".markdown", ".rst", ".log",
-            ".ini", ".cfg", ".toml", ".yaml", ".yml",
-            ".json", ".jsonl", ".xml", ".tex",
-        })
+        return frozenset(
+            {
+                ".txt",
+                ".md",
+                ".markdown",
+                ".rst",
+                ".log",
+                ".ini",
+                ".cfg",
+                ".toml",
+                ".yaml",
+                ".yml",
+                ".json",
+                ".jsonl",
+                ".xml",
+                ".tex",
+            }
+        )
 
     def read(self, path: Path) -> Document:
         try:

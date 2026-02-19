@@ -89,9 +89,7 @@ class PGVectorStore(BaseVectorStore):
         conn = self._connect()
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            cur.execute(
-                _CREATE_TABLE.format(table=self._table, dim=dim)
-            )
+            cur.execute(_CREATE_TABLE.format(table=self._table, dim=dim))
         conn.commit()
 
     def _dist_op(self) -> str:

@@ -67,15 +67,11 @@ class RactoTrainingMessage:
                 parts.append(
                     {
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{f.mime_type};base64,{f.base64_data}"
-                        },
+                        "image_url": {"url": f"data:{f.mime_type};base64,{f.base64_data}"},
                     }
                 )
             else:
-                parts.append(
-                    {"type": "text", "text": f.data.decode("utf-8", errors="replace")}
-                )
+                parts.append({"type": "text", "text": f.data.decode("utf-8", errors="replace")})
         parts.append({"type": "text", "text": self.content})
         return {"role": self.role, "content": parts}
 
@@ -113,9 +109,7 @@ class RactoTrainingMessage:
                     }
                 )
             elif f.is_text:
-                parts.append(
-                    {"type": "text", "text": f.data.decode("utf-8", errors="replace")}
-                )
+                parts.append({"type": "text", "text": f.data.decode("utf-8", errors="replace")})
             else:
                 label = f.name or "attachment"
                 parts.append(
@@ -233,9 +227,7 @@ class RactoTrainingExample:
         turns : list[tuple[str, str]]
             E.g. ``[("system", "…"), ("user", "…"), ("assistant", "…")]``
         """
-        return cls(
-            [RactoTrainingMessage(role=r, content=c) for r, c in turns]
-        )
+        return cls([RactoTrainingMessage(role=r, content=c) for r, c in turns])
 
     # ------------------------------------------------------------------
     # Serialisation
@@ -347,9 +339,7 @@ class RactoDataset:
         val_ds.export_jsonl("val.jsonl", provider="openai")
     """
 
-    def __init__(
-        self, examples: list[RactoTrainingExample] | None = None
-    ) -> None:
+    def __init__(self, examples: list[RactoTrainingExample] | None = None) -> None:
         self._examples: list[RactoTrainingExample] = list(examples or [])
 
     # ------------------------------------------------------------------
@@ -393,9 +383,7 @@ class RactoDataset:
         system : str
             Optional system prompt applied uniformly to every example.
         """
-        return cls(
-            [RactoTrainingExample.from_pair(u, a, system=system) for u, a in pairs]
-        )
+        return cls([RactoTrainingExample.from_pair(u, a, system=system) for u, a in pairs])
 
     @classmethod
     def from_jsonl(
@@ -438,9 +426,7 @@ class RactoDataset:
             elif provider == "anthropic":
                 msgs = []
                 if "system" in record:
-                    msgs.append(
-                        RactoTrainingMessage(role="system", content=record["system"])
-                    )
+                    msgs.append(RactoTrainingMessage(role="system", content=record["system"]))
                 msgs += [
                     RactoTrainingMessage(
                         role=m["role"],
@@ -454,27 +440,20 @@ class RactoDataset:
             elif provider == "gemini":
                 if "text_input" in record:
                     msgs = [
-                        RactoTrainingMessage(
-                            role="user", content=record["text_input"]
-                        ),
-                        RactoTrainingMessage(
-                            role="assistant", content=record["output"]
-                        ),
+                        RactoTrainingMessage(role="user", content=record["text_input"]),
+                        RactoTrainingMessage(role="assistant", content=record["output"]),
                     ]
                 else:
                     msgs = [
                         RactoTrainingMessage(
                             role="assistant" if c["role"] == "model" else c["role"],
-                            content=c["parts"][0].get("text", "")
-                            if c.get("parts")
-                            else "",
+                            content=c["parts"][0].get("text", "") if c.get("parts") else "",
                         )
                         for c in record.get("contents", [])
                     ]
             else:
                 raise ValueError(
-                    f"Unknown provider {provider!r}. "
-                    f"Choose from: 'openai', 'anthropic', 'gemini'."
+                    f"Unknown provider {provider!r}. Choose from: 'openai', 'anthropic', 'gemini'."
                 )
 
             examples.append(RactoTrainingExample(msgs))
@@ -520,9 +499,7 @@ class RactoDataset:
             ``(train_dataset, validation_dataset)``
         """
         if not 0 < train_ratio < 1:
-            raise ValueError(
-                f"train_ratio must be strictly between 0 and 1, got {train_ratio}"
-            )
+            raise ValueError(f"train_ratio must be strictly between 0 and 1, got {train_ratio}")
         shuffled = self.shuffle(seed=seed)
         n = int(len(shuffled) * train_ratio)
         return (
@@ -574,15 +551,11 @@ class RactoDataset:
                     )
                 for m in ex.messages:
                     if not m.content.strip() and not m.attachments:
-                        errors.append(
-                            f"[example {i}] Empty content in '{m.role}' message."
-                        )
+                        errors.append(f"[example {i}] Empty content in '{m.role}' message.")
 
             elif provider == "gemini":
                 if len(non_system) < 2:
-                    errors.append(
-                        f"[example {i}] Gemini needs at least one user+assistant pair."
-                    )
+                    errors.append(f"[example {i}] Gemini needs at least one user+assistant pair.")
                 user_count = sum(1 for m in non_system if m.role == "user")
                 asst_count = sum(1 for m in non_system if m.role == "assistant")
                 if user_count != asst_count:
@@ -646,9 +619,7 @@ class RactoDataset:
         """
         p = Path(path)
         if p.exists() and not overwrite:
-            raise FileExistsError(
-                f"{p} already exists. Pass overwrite=True to replace it."
-            )
+            raise FileExistsError(f"{p} already exists. Pass overwrite=True to replace it.")
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(self.to_jsonl_string(provider), encoding="utf-8")
         return p
@@ -668,16 +639,12 @@ class RactoDataset:
         """
         total_messages = sum(len(ex.messages) for ex in self._examples)
         multimodal_count = sum(
-            1
-            for ex in self._examples
-            if any(m.attachments for m in ex.messages)
+            1 for ex in self._examples if any(m.attachments for m in ex.messages)
         )
         return {
             "examples": len(self._examples),
             "total_messages": total_messages,
-            "avg_turns_per_example": round(
-                total_messages / max(len(self._examples), 1), 2
-            ),
+            "avg_turns_per_example": round(total_messages / max(len(self._examples), 1), 2),
             "multimodal_examples": multimodal_count,
         }
 

@@ -24,10 +24,14 @@ class ChunkMetadata(BaseModel):
     page: int | None = Field(default=None, description="Page number (1-based) for PDFs/docs.")
     chunk_index: int = Field(description="0-based index of this chunk within the document.")
     total_chunks: int = Field(description="Total number of chunks in the parent document.")
-    start_char: int = Field(description="Character offset in the *processed* document where this chunk begins.")
+    start_char: int = Field(
+        description="Character offset in the *processed* document where this chunk begins."
+    )
     end_char: int = Field(description="Character offset where this chunk ends (exclusive).")
     doc_id: str = Field(description="UUID of the parent Document.")
-    extra: dict[str, Any] = Field(default_factory=dict, description="Caller-supplied metadata pass-through.")
+    extra: dict[str, Any] = Field(
+        default_factory=dict, description="Caller-supplied metadata pass-through."
+    )
 
 
 class Document(BaseModel):

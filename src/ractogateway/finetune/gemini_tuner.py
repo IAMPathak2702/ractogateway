@@ -243,9 +243,7 @@ class GeminiFineTuner:
                 time.sleep(poll_interval)
 
         if "FAILED" in state:
-            raise RuntimeError(
-                f"Gemini tuning job failed.  Final state: {state}"
-            )
+            raise RuntimeError(f"Gemini tuning job failed.  Final state: {state}")
         result = operation.result()
         model_name = getattr(result, "name", None)
         if not isinstance(model_name, str) or not model_name:
@@ -296,10 +294,7 @@ class GeminiFineTuner:
         """
         if verbose:
             stats = dataset.summary()
-            print(
-                f"[GeminiFineTuner] Starting tuning with "
-                f"{stats['examples']} examples…"
-            )
+            print(f"[GeminiFineTuner] Starting tuning with {stats['examples']} examples…")
         operation = self.create_job(
             dataset,
             base_model,

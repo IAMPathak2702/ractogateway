@@ -30,8 +30,7 @@ class RetrievalResult(BaseModel):
 
 
 class RAGResponse(BaseModel):
-    """Combined output from a RAG query (retrieval + generation).
-    """
+    """Combined output from a RAG query (retrieval + generation)."""
 
     answer: LLMResponse
     sources: list[RetrievalResult]

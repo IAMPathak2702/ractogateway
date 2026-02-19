@@ -83,9 +83,7 @@ class FAISSStore(BaseVectorStore):
         for chunk in chunks:
             chunk_embedding = chunk.embedding
             if chunk_embedding is None:
-                raise ValueError(
-                    "Chunks must have embeddings before adding to FAISSStore."
-                )
+                raise ValueError("Chunks must have embeddings before adding to FAISSStore.")
             vectors.append(chunk_embedding)
         self._index.add(self._to_numpy(vectors))
         self._chunks.extend(chunks)
@@ -112,8 +110,7 @@ class FAISSStore(BaseVectorStore):
             chunk = self._chunks[idx]
             if filters:
                 match = all(
-                    chunk.metadata.extra.get(fk) == fv
-                    or getattr(chunk.metadata, fk, None) == fv
+                    chunk.metadata.extra.get(fk) == fv or getattr(chunk.metadata, fk, None) == fv
                     for fk, fv in filters.items()
                 )
                 if not match:

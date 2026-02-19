@@ -137,8 +137,7 @@ class QdrantStore(BaseVectorStore):
             from qdrant_client.models import Filter, FieldCondition, MatchValue  # noqa: PLC0415
 
             conditions = [
-                FieldCondition(key=k, match=MatchValue(value=v))
-                for k, v in filters.items()
+                FieldCondition(key=k, match=MatchValue(value=v)) for k, v in filters.items()
             ]
             kw["query_filter"] = Filter(must=conditions)
 

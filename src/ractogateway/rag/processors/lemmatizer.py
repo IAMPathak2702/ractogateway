@@ -25,7 +25,9 @@ def _require_nltk_lemmatizer() -> tuple[Any, Any]:
 
     for resource in ("wordnet", "averaged_perceptron_tagger", "averaged_perceptron_tagger_eng"):
         try:
-            nltk.data.find(f"corpora/{resource}" if "tagger" not in resource else f"taggers/{resource}")
+            nltk.data.find(
+                f"corpora/{resource}" if "tagger" not in resource else f"taggers/{resource}"
+            )
         except LookupError:
             nltk.download(resource, quiet=True)
 
@@ -74,8 +76,7 @@ class Lemmatizer(BaseProcessor):
         if self.use_pos_tagging:
             tagged = self._nltk.pos_tag(tokens)
             lemmas = [
-                self._lemmatizer.lemmatize(word, _get_wordnet_pos(pos))
-                for word, pos in tagged
+                self._lemmatizer.lemmatize(word, _get_wordnet_pos(pos)) for word, pos in tagged
             ]
         else:
             lemmas = [self._lemmatizer.lemmatize(t) for t in tokens]

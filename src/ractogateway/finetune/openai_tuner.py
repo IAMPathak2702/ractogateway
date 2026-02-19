@@ -198,14 +198,10 @@ class OpenAIFineTuner:
         page = client.fine_tuning.jobs.list(limit=limit)
         return [self.get_status(job.id) for job in page.data]
 
-    def list_events(
-        self, job_id: str, limit: int = 20
-    ) -> list[dict[str, Any]]:
+    def list_events(self, job_id: str, limit: int = 20) -> list[dict[str, Any]]:
         """Return recent training log events for a job."""
         client = self._client()
-        events = client.fine_tuning.jobs.list_events(
-            fine_tuning_job_id=job_id, limit=limit
-        )
+        events = client.fine_tuning.jobs.list_events(fine_tuning_job_id=job_id, limit=limit)
         return [
             {
                 "message": e.message,
@@ -263,8 +259,7 @@ class OpenAIFineTuner:
         if status["status"] != "succeeded":
             error = status.get("error") or "Unknown error"
             raise RuntimeError(
-                f"Fine-tuning job {job_id} ended with status "
-                f"'{status['status']}': {error}"
+                f"Fine-tuning job {job_id} ended with status '{status['status']}': {error}"
             )
         fine_tuned_model = status.get("fine_tuned_model")
         if not isinstance(fine_tuned_model, str) or not fine_tuned_model:
@@ -328,9 +323,7 @@ class OpenAIFineTuner:
         """
         errors = dataset.validate("openai")
         if errors:
-            raise ValueError(
-                "Dataset validation failed:\n" + "\n".join(errors)
-            )
+            raise ValueError("Dataset validation failed:\n" + "\n".join(errors))
 
         if verbose:
             stats = dataset.summary()
@@ -346,8 +339,7 @@ class OpenAIFineTuner:
         if validation_dataset:
             if verbose:
                 print(
-                    f"[OpenAIFineTuner] Uploading "
-                    f"{len(validation_dataset)} validation examples…"
+                    f"[OpenAIFineTuner] Uploading {len(validation_dataset)} validation examples…"
                 )
             validation_file = self.upload_dataset(validation_dataset)
             if verbose:

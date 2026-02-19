@@ -24,7 +24,15 @@ def _require_pymilvus() -> Any:
             "MilvusStore requires the 'pymilvus' package. "
             "Install it with:  pip install ractogateway[rag-milvus]"
         ) from exc
-    return Collection, CollectionSchema, DataType, FieldSchema, MilvusException, connections, utility
+    return (
+        Collection,
+        CollectionSchema,
+        DataType,
+        FieldSchema,
+        MilvusException,
+        connections,
+        utility,
+    )
 
 
 from ractogateway.rag._models.document import Chunk, ChunkMetadata
@@ -105,7 +113,9 @@ class MilvusStore(BaseVectorStore):
 
         schema = CollectionSchema(
             fields=[
-                FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, max_length=64, is_primary=True),
+                FieldSchema(
+                    name="chunk_id", dtype=DataType.VARCHAR, max_length=64, is_primary=True
+                ),
                 FieldSchema(name="doc_id", dtype=DataType.VARCHAR, max_length=64),
                 FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
                 FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=512),
@@ -117,7 +127,11 @@ class MilvusStore(BaseVectorStore):
         self._collection = Collection(self._collection_name, schema)
         self._collection.create_index(
             field_name="embedding",
-            index_params={"metric_type": self._metric_type, "index_type": "IVF_FLAT", "params": {"nlist": 128}},
+            index_params={
+                "metric_type": self._metric_type,
+                "index_type": "IVF_FLAT",
+                "params": {"nlist": 128},
+            },
         )
         self._collection.load()
 
@@ -127,14 +141,16 @@ class MilvusStore(BaseVectorStore):
         self._init(dim)
         for i in range(0, len(chunks), self._batch_size):
             batch = chunks[i : i + self._batch_size]
-            self._collection.insert([
-                [c.chunk_id for c in batch],
-                [c.doc_id for c in batch],
-                [c.content[:65535] for c in batch],
-                [c.metadata.source[:512] for c in batch],
-                [c.metadata.chunk_index for c in batch],
-                [c.embedding for c in batch],
-            ])
+            self._collection.insert(
+                [
+                    [c.chunk_id for c in batch],
+                    [c.doc_id for c in batch],
+                    [c.content[:65535] for c in batch],
+                    [c.metadata.source[:512] for c in batch],
+                    [c.metadata.chunk_index for c in batch],
+                    [c.embedding for c in batch],
+                ]
+            )
         self._collection.flush()
 
     def search(
@@ -149,7 +165,10 @@ class MilvusStore(BaseVectorStore):
             return []
         expr = None
         if filters:
-            parts = [f'{k} == "{v}"' if isinstance(v, str) else f"{k} == {v}" for k, v in filters.items()]
+            parts = [
+                f'{k} == "{v}"' if isinstance(v, str) else f"{k} == {v}"
+                for k, v in filters.items()
+            ]
             expr = " && ".join(parts)
         search_params = {"metric_type": self._metric_type, "params": {"nprobe": 10}}
         hits = self._collection.search(

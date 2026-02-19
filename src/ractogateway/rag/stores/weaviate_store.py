@@ -72,7 +72,9 @@ class WeaviateStore(BaseVectorStore):
             auth = weaviate.auth.AuthApiKey(self._api_key) if self._api_key else None
             self._client = weaviate.connect_to_custom(
                 http_host=self._url.split("://")[-1].split(":")[0],
-                http_port=int(self._url.split(":")[-1]) if ":" in self._url.split("://")[-1] else 80,
+                http_port=int(self._url.split(":")[-1])
+                if ":" in self._url.split("://")[-1]
+                else 80,
                 http_secure=self._url.startswith("https"),
                 grpc_host=self._url.split("://")[-1].split(":")[0],
                 grpc_port=50051,

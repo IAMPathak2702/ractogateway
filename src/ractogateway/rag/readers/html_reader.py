@@ -12,8 +12,22 @@ from ractogateway.rag.readers.base import BaseReader
 
 _SKIP_TAGS = {"script", "style", "head", "noscript", "nav", "footer", "header"}
 _BLOCK_TAGS = {
-    "p", "div", "article", "section", "h1", "h2", "h3", "h4", "h5", "h6",
-    "li", "td", "th", "blockquote", "pre", "br",
+    "p",
+    "div",
+    "article",
+    "section",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "li",
+    "td",
+    "th",
+    "blockquote",
+    "pre",
+    "br",
 }
 
 

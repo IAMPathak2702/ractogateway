@@ -34,9 +34,7 @@ class _Unset:
 # ---------------------------------------------------------------------------
 
 #: MIME types treated as images by every provider.
-_IMAGE_MIMES: frozenset[str] = frozenset(
-    {"image/jpeg", "image/png", "image/gif", "image/webp"}
-)
+_IMAGE_MIMES: frozenset[str] = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
 
 
 class RactoFile:
@@ -93,9 +91,7 @@ class RactoFile:
         return cls(data=p.read_bytes(), mime_type=mime_type, name=p.name)
 
     @classmethod
-    def from_bytes(
-        cls, data: bytes, mime_type: str, name: str = ""
-    ) -> "RactoFile":
+    def from_bytes(cls, data: bytes, mime_type: str, name: str = "") -> "RactoFile":
         """Create a :class:`RactoFile` directly from *data* bytes.
 
         Parameters
@@ -162,9 +158,7 @@ def _build_openai_content(
             parts.append(
                 {
                     "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{f.mime_type};base64,{f.base64_data}"
-                    },
+                    "image_url": {"url": f"data:{f.mime_type};base64,{f.base64_data}"},
                 }
             )
         else:
@@ -218,18 +212,13 @@ def _build_anthropic_content(
                 }
             )
         elif f.is_text:
-            parts.append(
-                {"type": "text", "text": f.data.decode("utf-8", errors="replace")}
-            )
+            parts.append({"type": "text", "text": f.data.decode("utf-8", errors="replace")})
         else:
             label = f.name or "attachment"
             parts.append(
                 {
                     "type": "text",
-                    "text": (
-                        f"[File: {label} ({f.mime_type}) — "
-                        f"base64 encoded]\n{f.base64_data}"
-                    ),
+                    "text": (f"[File: {label} ({f.mime_type}) — base64 encoded]\n{f.base64_data}"),
                 }
             )
     parts.append({"type": "text", "text": user_message})
