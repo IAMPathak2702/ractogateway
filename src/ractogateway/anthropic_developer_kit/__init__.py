@@ -13,7 +13,8 @@ from ractogateway._models.stream import StreamChunk, StreamDelta
 from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult
 from ractogateway.anthropic_developer_kit.kit import AnthropicDeveloperKit
 
-#: Short alias — ``claude.Chat(model="claude-sonnet-4-6")`` is identical to ``claude.AnthropicDeveloperKit(...)``.
+#: Short alias — ``claude.Chat(model="claude-sonnet-4-6")`` is identical to
+#: ``claude.AnthropicDeveloperKit(...)``.
 Chat = AnthropicDeveloperKit
 
 __all__ = [

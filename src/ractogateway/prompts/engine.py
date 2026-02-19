@@ -71,7 +71,7 @@ class RactoFile:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_path(cls, path: str | Path) -> "RactoFile":
+    def from_path(cls, path: str | Path) -> RactoFile:
         """Load a file from *path* and auto-detect its MIME type.
 
         Parameters
@@ -91,7 +91,7 @@ class RactoFile:
         return cls(data=p.read_bytes(), mime_type=mime_type, name=p.name)
 
     @classmethod
-    def from_bytes(cls, data: bytes, mime_type: str, name: str = "") -> "RactoFile":
+    def from_bytes(cls, data: bytes, mime_type: str, name: str = "") -> RactoFile:
         """Create a :class:`RactoFile` directly from *data* bytes.
 
         Parameters
@@ -140,7 +140,7 @@ class RactoFile:
 def _build_openai_content(
     user_message: str,
     attachments: list[RactoFile],
-) -> "str | list[dict[str, Any]]":
+) -> str | list[dict[str, Any]]:
     """Return OpenAI-compatible user content with optional file attachments.
 
     Images become ``image_url`` blocks using an inline ``data:`` URI.
@@ -176,7 +176,7 @@ def _build_openai_content(
 def _build_anthropic_content(
     user_message: str,
     attachments: list[RactoFile],
-) -> "str | list[dict[str, Any]]":
+) -> str | list[dict[str, Any]]:
     """Return Anthropic-compatible user content with optional file attachments.
 
     * Images  → ``image`` content blocks (base-64 source).
@@ -228,7 +228,7 @@ def _build_anthropic_content(
 def _build_google_content(
     user_message: str,
     attachments: list[RactoFile],
-) -> "str | list[dict[str, Any]]":
+) -> str | list[dict[str, Any]]:
     """Return Google Gemini-compatible user content with optional file attachments.
 
     Text files become ``text`` parts; all other files become ``inline_data``

@@ -93,14 +93,14 @@ class RecursiveChunker(BaseChunker):
 
         parts = text.split(sep)
         result: list[str] = []
-        for part in parts:
-            part = part.strip()
-            if not part:
+        for raw_part in parts:
+            part_text = raw_part.strip()
+            if not part_text:
                 continue
-            if len(part) <= self.chunk_size:
-                result.append(part)
+            if len(part_text) <= self.chunk_size:
+                result.append(part_text)
             else:
-                result.extend(self._split(part, remaining))
+                result.extend(self._split(part_text, remaining))
         return result
 
     def _merge(self, pieces: list[str]) -> list[str]:

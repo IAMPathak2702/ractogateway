@@ -6,7 +6,6 @@ import re
 from html.parser import HTMLParser
 from pathlib import Path
 
-
 from ractogateway.rag._models.document import Document
 from ractogateway.rag.readers.base import BaseReader
 

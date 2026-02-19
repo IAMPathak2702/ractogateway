@@ -11,7 +11,7 @@ from typing import Any
 
 def _require_google() -> Any:
     try:
-        from google import genai  # noqa: PLC0415
+        from google import genai
     except ImportError as exc:
         raise ImportError(
             "GoogleEmbedder requires the 'google-genai' package. "

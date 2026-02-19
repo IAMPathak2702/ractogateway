@@ -11,7 +11,7 @@ from typing import Any
 
 def _require_pypdf() -> Any:
     try:
-        import pypdf  # noqa: PLC0415
+        import pypdf
     except ImportError as exc:
         raise ImportError(
             "Reading PDF files requires the 'pypdf' package. "

@@ -5,12 +5,13 @@ Install with:  pip install ractogateway[rag-faiss]
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 
 def _require_faiss() -> Any:
     try:
-        import faiss  # noqa: PLC0415
+        import faiss
     except ImportError as exc:
         raise ImportError(
             "FAISSStore requires the 'faiss-cpu' package. "
@@ -19,7 +20,7 @@ def _require_faiss() -> Any:
     return faiss
 
 
-from ractogateway.rag._models.document import Chunk, ChunkMetadata
+from ractogateway.rag._models.document import Chunk
 from ractogateway.rag._models.retrieval import RetrievalResult
 from ractogateway.rag.stores.base import BaseVectorStore
 
@@ -64,7 +65,7 @@ class FAISSStore(BaseVectorStore):
             self._index = faiss.IndexFlatIP(dim)
 
     def _to_numpy(self, vectors: list[list[float]]) -> Any:
-        import numpy as np  # noqa: PLC0415
+        import numpy as np
 
         return np.array(vectors, dtype="float32")
 
@@ -96,7 +97,7 @@ class FAISSStore(BaseVectorStore):
     ) -> list[RetrievalResult]:
         if self._index is None or self._index.ntotal == 0:
             return []
-        import numpy as np  # noqa: PLC0415
+        import numpy as np
 
         query = np.array([embedding], dtype="float32")
         k = min(top_k, self._index.ntotal)
@@ -104,7 +105,7 @@ class FAISSStore(BaseVectorStore):
 
         results: list[RetrievalResult] = []
         rank = 1
-        for dist, idx in zip(distances[0], indices[0]):
+        for dist, idx in zip(distances[0], indices[0], strict=False):
             if idx < 0 or idx >= len(self._chunks):
                 continue
             chunk = self._chunks[idx]
@@ -143,19 +144,20 @@ class FAISSStore(BaseVectorStore):
 
     def save(self, path: str) -> None:
         """Persist the FAISS index to *path*.index and chunks to *path*.chunks."""
-        import json  # noqa: PLC0415
-        import pickle  # noqa: S403,PLC0415
+        import pickle
 
         faiss = _require_faiss()
         faiss.write_index(self._index, f"{path}.index")
-        with open(f"{path}.chunks", "wb") as f:
-            pickle.dump(self._chunks, f)  # noqa: S301
+        chunks_path = Path(f"{path}.chunks")
+        with chunks_path.open("wb") as f:
+            pickle.dump(self._chunks, f)
 
     def load(self, path: str) -> None:
         """Load a previously saved index from *path*."""
-        import pickle  # noqa: S403,PLC0415
+        import pickle
 
         faiss = _require_faiss()
         self._index = faiss.read_index(f"{path}.index")
-        with open(f"{path}.chunks", "rb") as f:
-            self._chunks = pickle.load(f)  # noqa: S301
+        chunks_path = Path(f"{path}.chunks")
+        with chunks_path.open("rb") as f:
+            self._chunks = pickle.load(f)

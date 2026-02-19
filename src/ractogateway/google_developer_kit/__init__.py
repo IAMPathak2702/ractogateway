@@ -14,7 +14,8 @@ from ractogateway._models.stream import StreamChunk, StreamDelta
 from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult
 from ractogateway.google_developer_kit.kit import GoogleDeveloperKit
 
-#: Short alias — ``gemini.Chat(model="gemini-2.0-flash")`` is identical to ``gemini.GoogleDeveloperKit(...)``.
+#: Short alias — ``gemini.Chat(model="gemini-2.0-flash")`` is identical to
+#: ``gemini.GoogleDeveloperKit(...)``.
 Chat = GoogleDeveloperKit
 
 __all__ = [

@@ -11,7 +11,7 @@ from typing import Any
 
 def _require_docx() -> Any:
     try:
-        import docx  # noqa: PLC0415
+        import docx
     except ImportError as exc:
         raise ImportError(
             "Reading Word (.docx) files requires the 'python-docx' package. "

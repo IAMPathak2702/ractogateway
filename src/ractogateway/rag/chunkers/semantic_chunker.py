@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 def _require_nltk() -> Any:
     try:
-        import nltk  # noqa: PLC0415
+        import nltk
     except ImportError as exc:
         raise ImportError(
             "SemanticChunker requires the 'nltk' package. "
@@ -40,7 +40,7 @@ from ractogateway.rag.chunkers.base import BaseChunker
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0 or norm_b == 0:

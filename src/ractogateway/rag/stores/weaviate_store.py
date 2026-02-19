@@ -10,7 +10,7 @@ from typing import Any
 
 def _require_weaviate() -> Any:
     try:
-        import weaviate  # noqa: PLC0415
+        import weaviate
     except ImportError as exc:
         raise ImportError(
             "WeaviateStore requires the 'weaviate-client' package. "
@@ -87,7 +87,7 @@ class WeaviateStore(BaseVectorStore):
 
         # Create class if needed
         if not self._client.collections.exists(self._class_name):
-            from weaviate.classes.config import Configure, Property, DataType  # noqa: PLC0415
+            from weaviate.classes.config import Configure, DataType, Property
 
             self._client.collections.create(
                 name=self._class_name,
@@ -124,7 +124,7 @@ class WeaviateStore(BaseVectorStore):
         filters: dict[str, Any] | None = None,
     ) -> list[RetrievalResult]:
         self._init()
-        from weaviate.classes.query import MetadataQuery  # noqa: PLC0415
+        from weaviate.classes.query import MetadataQuery
 
         collection = self._client.collections.get(self._class_name)
         kw: dict[str, Any] = {
@@ -134,7 +134,7 @@ class WeaviateStore(BaseVectorStore):
             "include_vector": True,
         }
         if filters:
-            from weaviate.classes.query import Filter  # noqa: PLC0415
+            from weaviate.classes.query import Filter
 
             weaviate_filters = None
             for k, v in filters.items():
@@ -168,7 +168,7 @@ class WeaviateStore(BaseVectorStore):
 
     def delete(self, chunk_ids: list[str]) -> None:
         self._init()
-        import uuid as _uuid  # noqa: PLC0415
+        import uuid as _uuid
 
         collection = self._client.collections.get(self._class_name)
         for cid in chunk_ids:

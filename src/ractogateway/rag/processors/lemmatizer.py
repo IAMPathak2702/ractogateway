@@ -15,8 +15,8 @@ from typing import Any
 
 def _require_nltk_lemmatizer() -> tuple[Any, Any]:
     try:
-        import nltk  # noqa: PLC0415
-        from nltk.stem import WordNetLemmatizer  # noqa: PLC0415
+        import nltk
+        from nltk.stem import WordNetLemmatizer
     except ImportError as exc:
         raise ImportError(
             "Lemmatizer requires the 'nltk' package. "
@@ -65,9 +65,9 @@ class Lemmatizer(BaseProcessor):
 
     def _init(self) -> None:
         if self._lemmatizer is None:
-            nltk, WordNetLemmatizer = _require_nltk_lemmatizer()
+            nltk, wordnet_lemmatizer_cls = _require_nltk_lemmatizer()
             self._nltk = nltk
-            self._lemmatizer = WordNetLemmatizer()
+            self._lemmatizer = wordnet_lemmatizer_cls()
 
     def process(self, text: str) -> str:
         self._init()

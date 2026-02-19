@@ -13,7 +13,7 @@ from typing import Any
 
 def _require_openpyxl() -> Any:
     try:
-        import openpyxl  # noqa: PLC0415
+        import openpyxl
     except ImportError as exc:
         raise ImportError(
             "Reading Excel (.xlsx/.xls) files requires the 'openpyxl' package. "

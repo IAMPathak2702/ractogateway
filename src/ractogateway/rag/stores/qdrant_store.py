@@ -10,8 +10,8 @@ from typing import Any
 
 def _require_qdrant() -> Any:
     try:
-        from qdrant_client import QdrantClient  # noqa: PLC0415
-        from qdrant_client.models import (  # noqa: PLC0415
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import (
             Distance,
             PointStruct,
             VectorParams,
@@ -67,7 +67,7 @@ class QdrantStore(BaseVectorStore):
         self._client: Any = None
 
     def _init(self, dim: int | None = None) -> None:
-        QdrantClient, Distance, PointStruct, VectorParams = _require_qdrant()
+        qdrant_client_cls, distance_enum, _point_struct_cls, vector_params_cls = _require_qdrant()
         if self._client is None:
             kw: dict[str, Any] = {}
             if self._url:
@@ -76,32 +76,32 @@ class QdrantStore(BaseVectorStore):
                 kw["location"] = ":memory:"
             if self._api_key:
                 kw["api_key"] = self._api_key
-            self._client = QdrantClient(**kw)
+            self._client = qdrant_client_cls(**kw)
 
         if dim is not None and self._dim is None:
             self._dim = dim
 
         dist_map = {
-            "cosine": Distance.COSINE,
-            "euclid": Distance.EUCLID,
-            "dot": Distance.DOT,
+            "cosine": distance_enum.COSINE,
+            "euclid": distance_enum.EUCLID,
+            "dot": distance_enum.DOT,
         }
-        dist = dist_map.get(self._distance_str, Distance.COSINE)
+        dist = dist_map.get(self._distance_str, distance_enum.COSINE)
 
         existing = [c.name for c in self._client.get_collections().collections]
         if self._collection not in existing and self._dim:
             self._client.create_collection(
                 collection_name=self._collection,
-                vectors_config=VectorParams(size=self._dim, distance=dist),
+                vectors_config=vector_params_cls(size=self._dim, distance=dist),
             )
 
     def add(self, chunks: list[Chunk]) -> None:
         self._require_embeddings(chunks)
         dim = len(chunks[0].embedding)  # type: ignore[arg-type]
         self._init(dim)
-        _, _, PointStruct, _ = _require_qdrant()
+        _, _, point_struct_cls, _ = _require_qdrant()
         points = [
-            PointStruct(
+            point_struct_cls(
                 id=c.chunk_id,
                 vector=c.embedding,
                 payload={
@@ -134,7 +134,7 @@ class QdrantStore(BaseVectorStore):
             "with_vectors": True,
         }
         if filters:
-            from qdrant_client.models import Filter, FieldCondition, MatchValue  # noqa: PLC0415
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
 
             conditions = [
                 FieldCondition(key=k, match=MatchValue(value=v)) for k, v in filters.items()
@@ -164,7 +164,7 @@ class QdrantStore(BaseVectorStore):
 
     def delete(self, chunk_ids: list[str]) -> None:
         self._init()
-        from qdrant_client.models import PointIdsList  # noqa: PLC0415
+        from qdrant_client.models import PointIdsList
 
         self._client.delete(
             collection_name=self._collection,

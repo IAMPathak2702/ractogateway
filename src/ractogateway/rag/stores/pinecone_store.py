@@ -10,7 +10,7 @@ from typing import Any
 
 def _require_pinecone() -> Any:
     try:
-        from pinecone import Pinecone  # noqa: PLC0415
+        from pinecone import Pinecone
     except ImportError as exc:
         raise ImportError(
             "PineconeStore requires the 'pinecone-client' package. "
@@ -49,7 +49,7 @@ class PineconeStore(BaseVectorStore):
         namespace: str = "",
         batch_size: int = 100,
     ) -> None:
-        import os  # noqa: PLC0415
+        import os
 
         self._index_name = index_name
         self._api_key = api_key or os.environ.get("PINECONE_API_KEY")
@@ -60,11 +60,11 @@ class PineconeStore(BaseVectorStore):
     def _init(self) -> None:
         if self._index is not None:
             return
-        Pinecone = _require_pinecone()
+        pinecone_cls = _require_pinecone()
         kw: dict[str, Any] = {}
         if self._api_key:
             kw["api_key"] = self._api_key
-        pc = Pinecone(**kw)
+        pc = pinecone_cls(**kw)
         self._index = pc.Index(self._index_name)
 
     def add(self, chunks: list[Chunk]) -> None:

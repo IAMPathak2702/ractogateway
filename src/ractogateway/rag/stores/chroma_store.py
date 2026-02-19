@@ -10,7 +10,7 @@ from typing import Any
 
 def _require_chromadb() -> Any:
     try:
-        import chromadb  # noqa: PLC0415
+        import chromadb
     except ImportError as exc:
         raise ImportError(
             "ChromaStore requires the 'chromadb' package. "
@@ -118,11 +118,12 @@ class ChromaStore(BaseVectorStore):
                 raw["metadatas"][0],
                 raw["distances"][0],
                 raw["embeddings"][0],
+                strict=False,
             ),
             start=1,
         ):
             score = 1.0 - dist if self._distance == "cosine" else -dist
-            from ractogateway.rag._models.document import ChunkMetadata  # noqa: PLC0415
+            from ractogateway.rag._models.document import ChunkMetadata
 
             chunk = Chunk(
                 chunk_id=doc_id,

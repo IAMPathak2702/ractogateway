@@ -171,9 +171,9 @@ class RactoRAG:
             try:
                 chunks = self.ingest(file_path, **metadata)
                 all_chunks.extend(chunks)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 # Log and continue rather than aborting the entire batch
-                import warnings  # noqa: PLC0415
+                import warnings
 
                 warnings.warn(f"Failed to ingest {file_path}: {exc}", stacklevel=2)
         return all_chunks
@@ -421,14 +421,16 @@ class RactoRAG:
         texts = [c.content for c in chunks]
         embeddings = self._embedder.embed(texts)
         return [
-            chunk.model_copy(update={"embedding": emb}) for chunk, emb in zip(chunks, embeddings)
+            chunk.model_copy(update={"embedding": emb})
+            for chunk, emb in zip(chunks, embeddings, strict=False)
         ]
 
     async def _aembed_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
         texts = [c.content for c in chunks]
         embeddings = await self._embedder.aembed(texts)
         return [
-            chunk.model_copy(update={"embedding": emb}) for chunk, emb in zip(chunks, embeddings)
+            chunk.model_copy(update={"embedding": emb})
+            for chunk, emb in zip(chunks, embeddings, strict=False)
         ]
 
     def _build_context(self, results: list[RetrievalResult]) -> str:

@@ -16,7 +16,7 @@ from typing import Any
 
 def _require_pillow() -> Any:
     try:
-        from PIL import Image  # noqa: PLC0415
+        from PIL import Image
     except ImportError as exc:
         raise ImportError(
             "Reading image files requires the 'Pillow' package. "
@@ -35,11 +35,11 @@ def _load_exif_tags() -> dict[int, str]:
     global _EXIF_TAGS  # noqa: PLW0603
     if not _EXIF_TAGS:
         try:
-            from PIL.ExifTags import TAGS  # noqa: PLC0415
+            from PIL.ExifTags import TAGS
 
-            _EXIF_TAGS = {k: v for k, v in TAGS.items()}
-        except Exception:  # noqa: BLE001
-            pass
+            _EXIF_TAGS = dict(TAGS.items())
+        except Exception:
+            return _EXIF_TAGS
     return _EXIF_TAGS
 
 
@@ -76,9 +76,9 @@ class ImageReader(BaseReader):
         )
 
     def read(self, path: Path) -> Document:
-        Image = _require_pillow()
+        image_module = _require_pillow()
 
-        with Image.open(str(path)) as img:
+        with image_module.open(str(path)) as img:
             width, height = img.size
             mode = img.mode
             fmt = img.format or path.suffix.upper().lstrip(".")
@@ -123,6 +123,6 @@ class ImageReader(BaseReader):
                     if isinstance(value, bytes):
                         continue  # skip binary blobs
                     result[tag_name] = str(value)[:200]
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:
+            return result
         return result

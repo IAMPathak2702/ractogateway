@@ -10,7 +10,7 @@ from typing import Any
 
 def _require_nltk() -> Any:
     try:
-        import nltk  # noqa: PLC0415
+        import nltk
     except ImportError as exc:
         raise ImportError(
             "SentenceChunker requires the 'nltk' package. "

@@ -10,7 +10,7 @@ from typing import Any
 
 def _require_pymilvus() -> Any:
     try:
-        from pymilvus import (  # noqa: PLC0415
+        from pymilvus import (
             Collection,
             CollectionSchema,
             DataType,
@@ -98,33 +98,41 @@ class MilvusStore(BaseVectorStore):
 
     def _init(self, dim: int | None = None) -> None:
         self._connect()
-        Collection, CollectionSchema, DataType, FieldSchema, _, _, utility = _require_pymilvus()
+        (
+            collection_cls,
+            collection_schema_cls,
+            data_type,
+            field_schema_cls,
+            _,
+            _,
+            utility,
+        ) = _require_pymilvus()
 
         if dim is not None:
             self._dim = dim
 
         if utility.has_collection(self._collection_name):
-            self._collection = Collection(self._collection_name)
+            self._collection = collection_cls(self._collection_name)
             self._collection.load()
             return
 
         if self._dim is None:
             return  # will be created on first add
 
-        schema = CollectionSchema(
+        schema = collection_schema_cls(
             fields=[
-                FieldSchema(
-                    name="chunk_id", dtype=DataType.VARCHAR, max_length=64, is_primary=True
+                field_schema_cls(
+                    name="chunk_id", dtype=data_type.VARCHAR, max_length=64, is_primary=True
                 ),
-                FieldSchema(name="doc_id", dtype=DataType.VARCHAR, max_length=64),
-                FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
-                FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=512),
-                FieldSchema(name="chunk_index", dtype=DataType.INT32),
-                FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self._dim),
+                field_schema_cls(name="doc_id", dtype=data_type.VARCHAR, max_length=64),
+                field_schema_cls(name="content", dtype=data_type.VARCHAR, max_length=65535),
+                field_schema_cls(name="source", dtype=data_type.VARCHAR, max_length=512),
+                field_schema_cls(name="chunk_index", dtype=data_type.INT32),
+                field_schema_cls(name="embedding", dtype=data_type.FLOAT_VECTOR, dim=self._dim),
             ],
             description="RactoGateway RAG chunks",
         )
-        self._collection = Collection(self._collection_name, schema)
+        self._collection = collection_cls(self._collection_name, schema)
         self._collection.create_index(
             field_name="embedding",
             index_params={

@@ -11,7 +11,7 @@ from typing import Any
 
 def _require_voyage() -> Any:
     try:
-        import voyageai  # noqa: PLC0415
+        import voyageai
     except ImportError as exc:
         raise ImportError(
             "VoyageEmbedder requires the 'voyageai' package. "

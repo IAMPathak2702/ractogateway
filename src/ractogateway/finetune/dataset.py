@@ -14,13 +14,15 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
 
 from ractogateway.prompts.engine import RactoFile
 
 RoleType = Literal["system", "user", "assistant"]
+_SINGLE_TURN_MESSAGE_COUNT = 2
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +190,7 @@ class RactoTrainingExample:
         *,
         system: str = "",
         user_attachments: list[RactoFile] | None = None,
-    ) -> "RactoTrainingExample":
+    ) -> RactoTrainingExample:
         """Create a single-turn (prompt → completion) training example.
 
         Parameters
@@ -219,7 +221,7 @@ class RactoTrainingExample:
     def from_conversation(
         cls,
         turns: list[tuple[RoleType, str]],
-    ) -> "RactoTrainingExample":
+    ) -> RactoTrainingExample:
         """Build from a list of ``(role, content)`` tuples.
 
         Parameters
@@ -278,7 +280,7 @@ class RactoTrainingExample:
         has_attachments = any(m.attachments for m in self.messages)
         non_system = [m for m in self.messages if m.role != "system"]
 
-        if not has_attachments and len(non_system) == 2:
+        if not has_attachments and len(non_system) == _SINGLE_TURN_MESSAGE_COUNT:
             user_msg = next(m for m in non_system if m.role == "user")
             asst_msg = next(m for m in non_system if m.role == "assistant")
             return {"text_input": user_msg.content, "output": asst_msg.content}
@@ -373,7 +375,7 @@ class RactoDataset:
         pairs: list[tuple[str, str]],
         *,
         system: str = "",
-    ) -> "RactoDataset":
+    ) -> RactoDataset:
         """Build a text-only dataset from ``(user, assistant)`` pairs.
 
         Parameters
@@ -390,7 +392,7 @@ class RactoDataset:
         cls,
         path: str | Path,
         provider: str = "openai",
-    ) -> "RactoDataset":
+    ) -> RactoDataset:
         """Load a JSONL dataset previously exported for *provider*.
 
         Supports text-only OpenAI, Anthropic, and Gemini formats.
@@ -405,8 +407,8 @@ class RactoDataset:
         p = Path(path)
         examples: list[RactoTrainingExample] = []
 
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
+        for raw_line in p.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
             if not line:
                 continue
 
@@ -464,7 +466,7 @@ class RactoDataset:
     # Dataset operations
     # ------------------------------------------------------------------
 
-    def shuffle(self, seed: int | None = None) -> "RactoDataset":
+    def shuffle(self, seed: int | None = None) -> RactoDataset:
         """Return a new dataset with examples in random order.
 
         Parameters
@@ -473,7 +475,7 @@ class RactoDataset:
             Optional random seed for reproducibility.
         """
         examples = list(self._examples)
-        rng = random.Random(seed)
+        rng = random.Random(seed)  # noqa: S311 - deterministic shuffling is intentional.
         rng.shuffle(examples)
         return RactoDataset(examples)
 
@@ -482,7 +484,7 @@ class RactoDataset:
         train_ratio: float = 0.8,
         *,
         seed: int | None = None,
-    ) -> tuple["RactoDataset", "RactoDataset"]:
+    ) -> tuple[RactoDataset, RactoDataset]:
         """Split into train and validation datasets.
 
         Parameters
@@ -554,7 +556,7 @@ class RactoDataset:
                         errors.append(f"[example {i}] Empty content in '{m.role}' message.")
 
             elif provider == "gemini":
-                if len(non_system) < 2:
+                if len(non_system) < _SINGLE_TURN_MESSAGE_COUNT:
                     errors.append(f"[example {i}] Gemini needs at least one user+assistant pair.")
                 user_count = sum(1 for m in non_system if m.role == "user")
                 asst_count = sum(1 for m in non_system if m.role == "assistant")

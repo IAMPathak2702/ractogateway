@@ -11,7 +11,7 @@ from typing import Any
 
 def _require_openai() -> Any:
     try:
-        import openai  # noqa: PLC0415
+        import openai
     except ImportError as exc:
         raise ImportError(
             "OpenAIEmbedder requires the 'openai' package. "

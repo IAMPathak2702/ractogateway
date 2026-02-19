@@ -11,8 +11,8 @@ from typing import Any
 
 def _require_pgvector() -> Any:
     try:
-        import psycopg2  # noqa: PLC0415
-        from pgvector.psycopg2 import register_vector  # noqa: PLC0415
+        import psycopg2
+        from pgvector.psycopg2 import register_vector
     except ImportError as exc:
         raise ImportError(
             "PGVectorStore requires 'psycopg2-binary' and 'pgvector'. "

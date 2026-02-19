@@ -8,6 +8,8 @@ from typing import Any
 from ractogateway.rag._models.document import Chunk
 from ractogateway.rag._models.retrieval import RetrievalResult
 
+_EMBEDDING_PREVIEW_COUNT = 5
+
 
 class BaseVectorStore(ABC):
     """Persist and search embedding vectors.
@@ -78,6 +80,6 @@ class BaseVectorStore(ABC):
         if missing:
             raise ValueError(
                 f"Chunks must have embeddings before adding to a vector store. "
-                f"Missing embeddings on chunk_ids: {missing[:5]}"
-                + (" (and more)" if len(missing) > 5 else "")
+                f"Missing embeddings on chunk_ids: {missing[:_EMBEDDING_PREVIEW_COUNT]}"
+                + (" (and more)" if len(missing) > _EMBEDDING_PREVIEW_COUNT else "")
             )
