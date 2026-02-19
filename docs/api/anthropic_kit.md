@@ -1,7 +1,16 @@
 # Anthropic Developer Kit
 
 ```{eval-rst}
-.. automodule:: ractogateway.anthropic_developer_kit
+.. autoclass:: ractogateway.anthropic_developer_kit.AnthropicDeveloperKit
    :members:
    :show-inheritance:
 ```
+
+## Short alias
+
+``Chat`` is an alias for ``AnthropicDeveloperKit``:
+
+.. code-block:: python
+
+   from ractogateway import anthropic_developer_kit as claude
+   kit = claude.Chat(model="claude-sonnet-4-6")
