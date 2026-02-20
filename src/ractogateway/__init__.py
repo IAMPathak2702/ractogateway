@@ -18,6 +18,12 @@ if TYPE_CHECKING:
         rag,
     )
     from ractogateway.adapters.base import LLMResponse
+    from ractogateway.exceptions import (
+        RactoGatewayAPIError,
+        RactoGatewayAuthError,
+        RactoGatewayError,
+        RactoGatewayTimeoutError,
+    )
     from ractogateway.finetune import (
         AnthropicFineTuner,
         GeminiFineTuner,
@@ -59,6 +65,10 @@ _MODULE_EXPORTS: dict[str, str] = {
 }
 
 _ATTR_EXPORTS: dict[str, tuple[str, str]] = {
+    "RactoGatewayError": ("ractogateway.exceptions", "RactoGatewayError"),
+    "RactoGatewayTimeoutError": ("ractogateway.exceptions", "RactoGatewayTimeoutError"),
+    "RactoGatewayAPIError": ("ractogateway.exceptions", "RactoGatewayAPIError"),
+    "RactoGatewayAuthError": ("ractogateway.exceptions", "RactoGatewayAuthError"),
     "AnthropicFineTuner": ("ractogateway.finetune", "AnthropicFineTuner"),
     "GeminiFineTuner": ("ractogateway.finetune", "GeminiFineTuner"),
     "OpenAIFineTuner": ("ractogateway.finetune", "OpenAIFineTuner"),
@@ -94,6 +104,10 @@ _ATTR_EXPORTS: dict[str, tuple[str, str]] = {
 }
 
 __all__ = [
+    "RactoGatewayError",
+    "RactoGatewayTimeoutError",
+    "RactoGatewayAPIError",
+    "RactoGatewayAuthError",
     "AnthropicFineTuner",
     "GeminiFineTuner",
     "OpenAIFineTuner",

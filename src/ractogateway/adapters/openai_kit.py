@@ -11,6 +11,7 @@ from ractogateway.adapters.base import (
     LLMResponse,
     ToolCallResult,
 )
+from ractogateway.exceptions import RactoGatewayError, _wrap_provider_error
 from ractogateway.prompts.engine import RactoPrompt
 from ractogateway.tools.registry import ToolRegistry
 
@@ -167,7 +168,12 @@ class OpenAILLMKit(BaseLLMAdapter):
             max_tokens=max_tokens,
             **kwargs,
         )
-        response = client.chat.completions.create(**request)
+        try:
+            response = client.chat.completions.create(**request)
+        except RactoGatewayError:
+            raise
+        except Exception as exc:
+            raise _wrap_provider_error(exc, "openai") from exc
         return self._normalise(response)
 
     async def arun(
@@ -189,7 +195,12 @@ class OpenAILLMKit(BaseLLMAdapter):
             max_tokens=max_tokens,
             **kwargs,
         )
-        response = await client.chat.completions.create(**request)
+        try:
+            response = await client.chat.completions.create(**request)
+        except RactoGatewayError:
+            raise
+        except Exception as exc:
+            raise _wrap_provider_error(exc, "openai") from exc
         return self._normalise(response)
 
     # ------------------------------------------------------------------

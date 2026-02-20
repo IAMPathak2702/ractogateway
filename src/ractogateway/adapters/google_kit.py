@@ -11,6 +11,7 @@ from ractogateway.adapters.base import (
     LLMResponse,
     ToolCallResult,
 )
+from ractogateway.exceptions import RactoGatewayError, _wrap_provider_error
 from ractogateway.prompts.engine import RactoPrompt
 from ractogateway.tools.registry import ToolRegistry
 
@@ -161,21 +162,26 @@ class GoogleLLMKit(BaseLLMAdapter):
         from google.genai import types
 
         client = self._make_client()
-        config = self._build_config(
+        gen_config = self._build_config(
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
             **kwargs,
         )
         system_prompt = prompt.compile()
-        response = client.models.generate_content(
-            model=self.model,
-            contents=user_message,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                **config,
-            ),
-        )
+        try:
+            response = client.models.generate_content(
+                model=self.model,
+                contents=user_message,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    **gen_config,
+                ),
+            )
+        except RactoGatewayError:
+            raise
+        except Exception as exc:
+            raise _wrap_provider_error(exc, "google") from exc
         return self._normalise(response)
 
     async def arun(
@@ -191,21 +197,26 @@ class GoogleLLMKit(BaseLLMAdapter):
         from google.genai import types
 
         client = self._make_client()
-        config = self._build_config(
+        gen_config = self._build_config(
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
             **kwargs,
         )
         system_prompt = prompt.compile()
-        response = await client.aio.models.generate_content(
-            model=self.model,
-            contents=user_message,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                **config,
-            ),
-        )
+        try:
+            response = await client.aio.models.generate_content(
+                model=self.model,
+                contents=user_message,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    **gen_config,
+                ),
+            )
+        except RactoGatewayError:
+            raise
+        except Exception as exc:
+            raise _wrap_provider_error(exc, "google") from exc
         return self._normalise(response)
 
     # ------------------------------------------------------------------

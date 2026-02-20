@@ -21,8 +21,9 @@ from typing import Any
 from ractogateway._models.chat import ChatConfig
 from ractogateway._models.embedding import EmbeddingConfig, EmbeddingResponse, EmbeddingVector
 from ractogateway._models.stream import StreamChunk, StreamDelta
-from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult
+from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult, try_parse_json
 from ractogateway.adapters.openai_kit import OpenAILLMKit
+from ractogateway.exceptions import RactoGatewayError, _wrap_provider_error
 from ractogateway.prompts.engine import RactoPrompt
 
 
@@ -172,16 +173,23 @@ class OpenAIDeveloperKit:
         accumulated = ""
         tc_acc: dict[int, dict[str, Any]] = {}
 
-        with client.chat.completions.create(**request) as stream_resp:
-            for event in stream_resp:
-                chunk = self._process_openai_event(
-                    event,
-                    accumulated,
-                    tc_acc,
-                )
-                if chunk is not None:
-                    accumulated = chunk.accumulated_text
-                    yield chunk
+        try:
+            with client.chat.completions.create(**request) as stream_resp:
+                for event in stream_resp:
+                    chunk = self._process_openai_event(
+                        event,
+                        accumulated,
+                        tc_acc,
+                    )
+                    if chunk is not None:
+                        accumulated = chunk.accumulated_text
+                        if chunk.is_final and config.response_model is not None:
+                            _apply_stream_response_model(chunk, config)
+                        yield chunk
+        except RactoGatewayError:
+            raise
+        except Exception as exc:
+            raise _wrap_provider_error(exc, "openai") from exc
 
     async def astream(self, config: ChatConfig) -> AsyncIterator[StreamChunk]:
         """Async streaming — yields ``StreamChunk`` objects."""
@@ -201,16 +209,23 @@ class OpenAIDeveloperKit:
         accumulated = ""
         tc_acc: dict[int, dict[str, Any]] = {}
 
-        async with await client.chat.completions.create(**request) as stream_resp:
-            async for event in stream_resp:
-                chunk = self._process_openai_event(
-                    event,
-                    accumulated,
-                    tc_acc,
-                )
-                if chunk is not None:
-                    accumulated = chunk.accumulated_text
-                    yield chunk
+        try:
+            async with await client.chat.completions.create(**request) as stream_resp:
+                async for event in stream_resp:
+                    chunk = self._process_openai_event(
+                        event,
+                        accumulated,
+                        tc_acc,
+                    )
+                    if chunk is not None:
+                        accumulated = chunk.accumulated_text
+                        if chunk.is_final and config.response_model is not None:
+                            _apply_stream_response_model(chunk, config)
+                        yield chunk
+        except RactoGatewayError:
+            raise
+        except Exception as exc:
+            raise _wrap_provider_error(exc, "openai") from exc
 
     # ------------------------------------------------------------------
     # Embeddings  (sync / async)
@@ -373,3 +388,23 @@ def _maybe_validate(response: LLMResponse, config: ChatConfig) -> LLMResponse:
             warning = f"[RactoGateway] response_model validation failed: {exc}"
             response.content = f"{response.content}\n\n{warning}" if response.content else warning
     return response
+
+
+def _apply_stream_response_model(chunk: StreamChunk, config: ChatConfig) -> None:
+    """Parse and validate the final chunk's ``accumulated_text`` against ``config.response_model``.
+
+    Mutates *chunk* in-place: sets ``chunk.parsed`` to the validated model
+    dump on success, or to the raw parsed dict when validation fails (so the
+    caller can still inspect the data).  No exception is raised on failure.
+    """
+    if config.response_model is None:
+        return
+    parsed = try_parse_json(chunk.accumulated_text)
+    if isinstance(parsed, dict):
+        try:
+            validated = config.response_model.model_validate(parsed)
+            chunk.parsed = validated.model_dump()
+        except Exception:
+            chunk.parsed = parsed  # best-effort: store raw parsed dict
+    elif parsed is not None:
+        chunk.parsed = parsed

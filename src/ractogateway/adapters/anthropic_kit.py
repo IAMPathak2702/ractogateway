@@ -11,6 +11,7 @@ from ractogateway.adapters.base import (
     LLMResponse,
     ToolCallResult,
 )
+from ractogateway.exceptions import RactoGatewayError, _wrap_provider_error
 from ractogateway.prompts.engine import RactoPrompt
 from ractogateway.tools.registry import ToolRegistry
 
@@ -150,7 +151,12 @@ class AnthropicLLMKit(BaseLLMAdapter):
             max_tokens=max_tokens,
             **kwargs,
         )
-        response = client.messages.create(**request)
+        try:
+            response = client.messages.create(**request)
+        except RactoGatewayError:
+            raise
+        except Exception as exc:
+            raise _wrap_provider_error(exc, "anthropic") from exc
         return self._normalise(response)
 
     async def arun(
@@ -172,7 +178,12 @@ class AnthropicLLMKit(BaseLLMAdapter):
             max_tokens=max_tokens,
             **kwargs,
         )
-        response = await client.messages.create(**request)
+        try:
+            response = await client.messages.create(**request)
+        except RactoGatewayError:
+            raise
+        except Exception as exc:
+            raise _wrap_provider_error(exc, "anthropic") from exc
         return self._normalise(response)
 
     # ------------------------------------------------------------------

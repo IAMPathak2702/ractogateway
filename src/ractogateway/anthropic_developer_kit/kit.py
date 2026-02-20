@@ -24,7 +24,8 @@ from typing import Any
 from ractogateway._models.chat import ChatConfig
 from ractogateway._models.stream import StreamChunk, StreamDelta
 from ractogateway.adapters.anthropic_kit import AnthropicLLMKit
-from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult
+from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult, try_parse_json
+from ractogateway.exceptions import RactoGatewayError, _wrap_provider_error
 from ractogateway.prompts.engine import RactoPrompt
 
 
@@ -150,22 +151,29 @@ class AnthropicDeveloperKit:
         finish_reason = FinishReason.STOP
         usage: dict[str, int] = {}
 
-        with client.messages.stream(**request) as stream_resp:
-            for event in stream_resp:
-                chunk = self._process_anthropic_event(
-                    event,
-                    accumulated,
-                    tc_acc,
-                    finish_reason,
-                    usage,
-                )
-                if chunk is not None:
-                    accumulated = chunk.accumulated_text
-                    if chunk.finish_reason is not None:
-                        finish_reason = chunk.finish_reason
-                    if chunk.usage:
-                        usage = chunk.usage
-                    yield chunk
+        try:
+            with client.messages.stream(**request) as stream_resp:
+                for event in stream_resp:
+                    chunk = self._process_anthropic_event(
+                        event,
+                        accumulated,
+                        tc_acc,
+                        finish_reason,
+                        usage,
+                    )
+                    if chunk is not None:
+                        accumulated = chunk.accumulated_text
+                        if chunk.finish_reason is not None:
+                            finish_reason = chunk.finish_reason
+                        if chunk.usage:
+                            usage = chunk.usage
+                        if chunk.is_final and config.response_model is not None:
+                            _apply_stream_response_model(chunk, config)
+                        yield chunk
+        except RactoGatewayError:
+            raise
+        except Exception as exc:
+            raise _wrap_provider_error(exc, "anthropic") from exc
 
     async def astream(self, config: ChatConfig) -> AsyncIterator[StreamChunk]:
         """Async streaming via Anthropic's async ``messages.stream()``."""
@@ -185,22 +193,29 @@ class AnthropicDeveloperKit:
         finish_reason = FinishReason.STOP
         usage: dict[str, int] = {}
 
-        async with client.messages.stream(**request) as stream_resp:
-            async for event in stream_resp:
-                chunk = self._process_anthropic_event(
-                    event,
-                    accumulated,
-                    tc_acc,
-                    finish_reason,
-                    usage,
-                )
-                if chunk is not None:
-                    accumulated = chunk.accumulated_text
-                    if chunk.finish_reason is not None:
-                        finish_reason = chunk.finish_reason
-                    if chunk.usage:
-                        usage = chunk.usage
-                    yield chunk
+        try:
+            async with client.messages.stream(**request) as stream_resp:
+                async for event in stream_resp:
+                    chunk = self._process_anthropic_event(
+                        event,
+                        accumulated,
+                        tc_acc,
+                        finish_reason,
+                        usage,
+                    )
+                    if chunk is not None:
+                        accumulated = chunk.accumulated_text
+                        if chunk.finish_reason is not None:
+                            finish_reason = chunk.finish_reason
+                        if chunk.usage:
+                            usage = chunk.usage
+                        if chunk.is_final and config.response_model is not None:
+                            _apply_stream_response_model(chunk, config)
+                        yield chunk
+        except RactoGatewayError:
+            raise
+        except Exception as exc:
+            raise _wrap_provider_error(exc, "anthropic") from exc
 
     # ------------------------------------------------------------------
     # Internal — Anthropic stream event processing
@@ -311,3 +326,23 @@ def _maybe_validate(response: LLMResponse, config: ChatConfig) -> LLMResponse:
             warning = f"[RactoGateway] response_model validation failed: {exc}"
             response.content = f"{response.content}\n\n{warning}" if response.content else warning
     return response
+
+
+def _apply_stream_response_model(chunk: StreamChunk, config: ChatConfig) -> None:
+    """Parse and validate the final chunk's ``accumulated_text`` against ``config.response_model``.
+
+    Mutates *chunk* in-place: sets ``chunk.parsed`` to the validated model
+    dump on success, or to the raw parsed dict when validation fails (so the
+    caller can still inspect the data).  No exception is raised on failure.
+    """
+    if config.response_model is None:
+        return
+    parsed = try_parse_json(chunk.accumulated_text)
+    if isinstance(parsed, dict):
+        try:
+            validated = config.response_model.model_validate(parsed)
+            chunk.parsed = validated.model_dump()
+        except Exception:
+            chunk.parsed = parsed  # best-effort: store raw parsed dict
+    elif parsed is not None:
+        chunk.parsed = parsed

@@ -48,6 +48,13 @@ class StreamChunk(BaseModel):
     tool_calls: list[ToolCallResult] = Field(default_factory=list)
     usage: dict[str, int] = Field(default_factory=dict)
     is_final: bool = False
+    parsed: dict[str, Any] | list[Any] | None = Field(
+        default=None,
+        description=(
+            "Auto-parsed and validated JSON from accumulated_text on the final chunk. "
+            "Populated only when ChatConfig.response_model is set and the stream completes."
+        ),
+    )
     raw: Any = Field(default=None)
 
     model_config = {"arbitrary_types_allowed": True}
