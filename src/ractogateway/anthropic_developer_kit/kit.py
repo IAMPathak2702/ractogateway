@@ -19,7 +19,7 @@ from __future__ import annotations
 import json as _json
 import os
 from collections.abc import AsyncIterator, Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ractogateway._models.chat import ChatConfig
 from ractogateway._models.stream import StreamChunk, StreamDelta
@@ -27,6 +27,12 @@ from ractogateway.adapters.anthropic_kit import AnthropicLLMKit
 from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult, try_parse_json
 from ractogateway.exceptions import RactoGatewayError, _wrap_provider_error
 from ractogateway.prompts.engine import RactoPrompt
+
+if TYPE_CHECKING:
+    from ractogateway.cache.exact_cache import ExactMatchCache
+    from ractogateway.cache.semantic_cache import SemanticCache
+    from ractogateway.routing.router import CostAwareRouter
+    from ractogateway.truncation.truncator import TokenTruncator
 
 
 def _require_anthropic() -> Any:
@@ -41,16 +47,28 @@ def _require_anthropic() -> Any:
 
 
 class AnthropicDeveloperKit:
-    """Complete Anthropic Claude developer kit — chat and streaming.
+    """Complete Anthropic Claude developer kit — chat, streaming, and
+    optional performance/cost optimisation middleware.
 
     Parameters
     ----------
     model:
         Claude model (e.g. ``"claude-sonnet-4-5-20250929"``, ``"claude-opus-4-6"``).
+        Use ``"auto"`` when a :class:`~ractogateway.routing.CostAwareRouter`
+        is provided — the router will select the model per-request.
     api_key:
         Anthropic API key.  Falls back to ``ANTHROPIC_API_KEY`` env var.
     default_prompt:
         RACTO prompt used when ``ChatConfig.prompt`` is ``None``.
+    exact_cache:
+        Optional :class:`~ractogateway.cache.ExactMatchCache`.
+    semantic_cache:
+        Optional :class:`~ractogateway.cache.SemanticCache`.
+    router:
+        Optional :class:`~ractogateway.routing.CostAwareRouter`.
+        **Required** when ``model="auto"``.
+    truncator:
+        Optional :class:`~ractogateway.truncation.TokenTruncator`.
     """
 
     provider: str = "anthropic"
@@ -61,11 +79,37 @@ class AnthropicDeveloperKit:
         *,
         api_key: str | None = None,
         default_prompt: RactoPrompt | None = None,
+        exact_cache: ExactMatchCache | None = None,
+        semantic_cache: SemanticCache | None = None,
+        router: CostAwareRouter | None = None,
+        truncator: TokenTruncator | None = None,
     ) -> None:
+        if model == "auto" and router is None:
+            raise ValueError(
+                "model='auto' requires a CostAwareRouter.  "
+                "Pass router=CostAwareRouter([...]) to the kit."
+            )
         self._model = model
         self._api_key = api_key
         self._default_prompt = default_prompt
-        self._adapter = AnthropicLLMKit(model=model, api_key=api_key)
+        self._exact_cache = exact_cache
+        self._semantic_cache = semantic_cache
+        self._router = router
+        self._truncator = truncator
+        # Adapter pool for cost-aware routing
+        self._adapters: dict[str, AnthropicLLMKit] = {}
+        fallback = "claude-haiku-4-5-20251001"
+        self._adapter = self._get_adapter(model if model != "auto" else fallback)
+
+    # ------------------------------------------------------------------
+    # Adapter pool
+    # ------------------------------------------------------------------
+
+    def _get_adapter(self, model: str) -> AnthropicLLMKit:
+        """Return (or lazily create) an adapter for *model*."""
+        if model not in self._adapters:
+            self._adapters[model] = AnthropicLLMKit(model=model, api_key=self._api_key)
+        return self._adapters[model]
 
     # ------------------------------------------------------------------
     # Client factories
@@ -92,13 +136,45 @@ class AnthropicDeveloperKit:
         return prompt
 
     # ------------------------------------------------------------------
+    # Middleware helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_model(self, user_message: str) -> str:
+        if self._router is not None:
+            return self._router.route(user_message)
+        return self._model
+
+    def _apply_truncation(self, config: ChatConfig, model: str) -> ChatConfig:
+        if self._truncator is None:
+            return config
+        return self._truncator.truncate(config, model)
+
+    # ------------------------------------------------------------------
     # Chat  (sync / async)
     # ------------------------------------------------------------------
 
     def chat(self, config: ChatConfig) -> LLMResponse:
-        """Synchronous chat completion."""
+        """Synchronous chat completion with optional middleware pipeline."""
         prompt = self._resolve_prompt(config)
-        response = self._adapter.run(
+        model = self._resolve_model(config.user_message)
+        config = self._apply_truncation(config, model)
+        system_prompt = prompt.compile()
+
+        if self._exact_cache is not None:
+            cached = self._exact_cache.get(
+                config.user_message, system_prompt, model,
+                config.temperature, config.max_tokens,
+            )
+            if cached is not None:
+                return cached
+
+        if self._semantic_cache is not None:
+            sem_cached = self._semantic_cache.get(config.user_message)
+            if sem_cached is not None:
+                return sem_cached
+
+        adapter = self._get_adapter(model)
+        response = adapter.run(
             prompt,
             config.user_message,
             tools=config.tools,
@@ -106,12 +182,40 @@ class AnthropicDeveloperKit:
             max_tokens=config.max_tokens,
             **config.extra,
         )
-        return _maybe_validate(response, config)
+        response = _maybe_validate(response, config)
+
+        if self._exact_cache is not None:
+            self._exact_cache.put(
+                config.user_message, system_prompt, model,
+                config.temperature, config.max_tokens, response,
+            )
+        if self._semantic_cache is not None:
+            self._semantic_cache.put(config.user_message, response)
+
+        return response
 
     async def achat(self, config: ChatConfig) -> LLMResponse:
-        """Async chat completion."""
+        """Async chat completion with optional middleware pipeline."""
         prompt = self._resolve_prompt(config)
-        response = await self._adapter.arun(
+        model = self._resolve_model(config.user_message)
+        config = self._apply_truncation(config, model)
+        system_prompt = prompt.compile()
+
+        if self._exact_cache is not None:
+            cached = self._exact_cache.get(
+                config.user_message, system_prompt, model,
+                config.temperature, config.max_tokens,
+            )
+            if cached is not None:
+                return cached
+
+        if self._semantic_cache is not None:
+            sem_cached = self._semantic_cache.get(config.user_message)
+            if sem_cached is not None:
+                return sem_cached
+
+        adapter = self._get_adapter(model)
+        response = await adapter.arun(
             prompt,
             config.user_message,
             tools=config.tools,
@@ -119,7 +223,17 @@ class AnthropicDeveloperKit:
             max_tokens=config.max_tokens,
             **config.extra,
         )
-        return _maybe_validate(response, config)
+        response = _maybe_validate(response, config)
+
+        if self._exact_cache is not None:
+            self._exact_cache.put(
+                config.user_message, system_prompt, model,
+                config.temperature, config.max_tokens, response,
+            )
+        if self._semantic_cache is not None:
+            self._semantic_cache.put(config.user_message, response)
+
+        return response
 
     # ------------------------------------------------------------------
     # Stream  (sync / async)
@@ -136,8 +250,11 @@ class AnthropicDeveloperKit:
                     print(f"\\nTokens: {chunk.usage}")
         """
         prompt = self._resolve_prompt(config)
+        model = self._resolve_model(config.user_message)
+        config = self._apply_truncation(config, model)
+        adapter = self._get_adapter(model)
         client = self._sync_client()
-        request = self._adapter._build_request(
+        request = adapter._build_request(
             prompt,
             config.user_message,
             tools=config.tools,
@@ -178,8 +295,11 @@ class AnthropicDeveloperKit:
     async def astream(self, config: ChatConfig) -> AsyncIterator[StreamChunk]:
         """Async streaming via Anthropic's async ``messages.stream()``."""
         prompt = self._resolve_prompt(config)
+        model = self._resolve_model(config.user_message)
+        config = self._apply_truncation(config, model)
+        adapter = self._get_adapter(model)
         client = self._async_client()
-        request = self._adapter._build_request(
+        request = adapter._build_request(
             prompt,
             config.user_message,
             tools=config.tools,

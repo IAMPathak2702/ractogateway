@@ -16,7 +16,7 @@ from __future__ import annotations
 import json as _json
 import os
 from collections.abc import AsyncIterator, Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ractogateway._models.chat import ChatConfig
 from ractogateway._models.embedding import EmbeddingConfig, EmbeddingResponse, EmbeddingVector
@@ -25,6 +25,12 @@ from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult
 from ractogateway.adapters.openai_kit import OpenAILLMKit
 from ractogateway.exceptions import RactoGatewayError, _wrap_provider_error
 from ractogateway.prompts.engine import RactoPrompt
+
+if TYPE_CHECKING:
+    from ractogateway.cache.exact_cache import ExactMatchCache
+    from ractogateway.cache.semantic_cache import SemanticCache
+    from ractogateway.routing.router import CostAwareRouter
+    from ractogateway.truncation.truncator import TokenTruncator
 
 
 def _require_openai() -> Any:
@@ -39,12 +45,15 @@ def _require_openai() -> Any:
 
 
 class OpenAIDeveloperKit:
-    """Complete OpenAI developer kit — chat, stream, and embeddings.
+    """Complete OpenAI developer kit — chat, stream, embeddings, and
+    optional performance/cost optimisation middleware.
 
     Parameters
     ----------
     model:
         Chat model (e.g. ``"gpt-4o"``, ``"gpt-4o-mini"``).
+        Use ``"auto"`` when a :class:`~ractogateway.routing.CostAwareRouter`
+        is provided — the router will select the model per-request.
     api_key:
         OpenAI API key.  Falls back to ``OPENAI_API_KEY`` env var.
     base_url:
@@ -53,6 +62,20 @@ class OpenAIDeveloperKit:
         Default embedding model.  Defaults to ``"text-embedding-3-small"``.
     default_prompt:
         RACTO prompt used when ``ChatConfig.prompt`` is ``None``.
+    exact_cache:
+        Optional :class:`~ractogateway.cache.ExactMatchCache`.  Serves
+        byte-identical requests from memory at zero cost.
+    semantic_cache:
+        Optional :class:`~ractogateway.cache.SemanticCache`.  Returns cached
+        answers for semantically similar queries (similarity ≥ threshold).
+    router:
+        Optional :class:`~ractogateway.routing.CostAwareRouter`.  Selects
+        the cheapest model that can handle each request's complexity.
+        **Required** when ``model="auto"``.
+    truncator:
+        Optional :class:`~ractogateway.truncation.TokenTruncator`.
+        Automatically trims conversation history to fit the model's context
+        window before each API call.
     """
 
     provider: str = "openai"
@@ -65,17 +88,46 @@ class OpenAIDeveloperKit:
         base_url: str | None = None,
         embedding_model: str = "text-embedding-3-small",
         default_prompt: RactoPrompt | None = None,
+        exact_cache: ExactMatchCache | None = None,
+        semantic_cache: SemanticCache | None = None,
+        router: CostAwareRouter | None = None,
+        truncator: TokenTruncator | None = None,
     ) -> None:
+        if model == "auto" and router is None:
+            raise ValueError(
+                "model='auto' requires a CostAwareRouter.  "
+                "Pass router=CostAwareRouter([...]) to the kit."
+            )
         self._model = model
         self._api_key = api_key
         self._base_url = base_url
         self._embedding_model = embedding_model
         self._default_prompt = default_prompt
-        self._adapter = OpenAILLMKit(
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-        )
+        self._exact_cache = exact_cache
+        self._semantic_cache = semantic_cache
+        self._router = router
+        self._truncator = truncator
+        # Adapter pool: reuse per-model adapters (O(1) lookup after first use)
+        self._adapters: dict[str, OpenAILLMKit] = {}
+        # Warm-up the default adapter (skip for "auto" — router decides model)
+        if model != "auto":
+            self._adapter = self._get_adapter(model)
+        else:
+            self._adapter = self._get_adapter("gpt-4o")  # placeholder, never used directly
+
+    # ------------------------------------------------------------------
+    # Adapter pool
+    # ------------------------------------------------------------------
+
+    def _get_adapter(self, model: str) -> OpenAILLMKit:
+        """Return (or lazily create) an adapter for *model*."""
+        if model not in self._adapters:
+            self._adapters[model] = OpenAILLMKit(
+                model=model,
+                api_key=self._api_key,
+                base_url=self._base_url,
+            )
+        return self._adapters[model]
 
     # ------------------------------------------------------------------
     # Client factories
@@ -114,13 +166,54 @@ class OpenAIDeveloperKit:
         return prompt
 
     # ------------------------------------------------------------------
+    # Middleware helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_model(self, user_message: str) -> str:
+        """Return the effective model for *user_message* (router or default)."""
+        if self._router is not None:
+            return self._router.route(user_message)
+        return self._model
+
+    def _apply_truncation(self, config: ChatConfig, model: str) -> ChatConfig:
+        """Return a (possibly trimmed) copy of *config* if truncator is set."""
+        if self._truncator is None:
+            return config
+        return self._truncator.truncate(config, model)
+
+    # ------------------------------------------------------------------
     # Chat  (sync / async)
     # ------------------------------------------------------------------
 
     def chat(self, config: ChatConfig) -> LLMResponse:
-        """Synchronous chat completion."""
+        """Synchronous chat completion with optional middleware pipeline.
+
+        Middleware order: truncate → exact cache → semantic cache →
+        route model → API call → write caches.
+        """
         prompt = self._resolve_prompt(config)
-        response = self._adapter.run(
+        model = self._resolve_model(config.user_message)
+        config = self._apply_truncation(config, model)
+        system_prompt = prompt.compile()
+
+        # Exact-match cache lookup
+        if self._exact_cache is not None:
+            cached = self._exact_cache.get(
+                config.user_message, system_prompt, model,
+                config.temperature, config.max_tokens,
+            )
+            if cached is not None:
+                return cached
+
+        # Semantic cache lookup
+        if self._semantic_cache is not None:
+            sem_cached = self._semantic_cache.get(config.user_message)
+            if sem_cached is not None:
+                return sem_cached
+
+        # API call
+        adapter = self._get_adapter(model)
+        response = adapter.run(
             prompt,
             config.user_message,
             tools=config.tools,
@@ -128,12 +221,44 @@ class OpenAIDeveloperKit:
             max_tokens=config.max_tokens,
             **config.extra,
         )
-        return _maybe_validate(response, config)
+        response = _maybe_validate(response, config)
+
+        # Write to caches
+        if self._exact_cache is not None:
+            self._exact_cache.put(
+                config.user_message, system_prompt, model,
+                config.temperature, config.max_tokens, response,
+            )
+        if self._semantic_cache is not None:
+            self._semantic_cache.put(config.user_message, response)
+
+        return response
 
     async def achat(self, config: ChatConfig) -> LLMResponse:
-        """Async chat completion."""
+        """Async chat completion with optional middleware pipeline."""
         prompt = self._resolve_prompt(config)
-        response = await self._adapter.arun(
+        model = self._resolve_model(config.user_message)
+        config = self._apply_truncation(config, model)
+        system_prompt = prompt.compile()
+
+        # Exact-match cache lookup
+        if self._exact_cache is not None:
+            cached = self._exact_cache.get(
+                config.user_message, system_prompt, model,
+                config.temperature, config.max_tokens,
+            )
+            if cached is not None:
+                return cached
+
+        # Semantic cache lookup
+        if self._semantic_cache is not None:
+            sem_cached = self._semantic_cache.get(config.user_message)
+            if sem_cached is not None:
+                return sem_cached
+
+        # API call
+        adapter = self._get_adapter(model)
+        response = await adapter.arun(
             prompt,
             config.user_message,
             tools=config.tools,
@@ -141,7 +266,18 @@ class OpenAIDeveloperKit:
             max_tokens=config.max_tokens,
             **config.extra,
         )
-        return _maybe_validate(response, config)
+        response = _maybe_validate(response, config)
+
+        # Write to caches
+        if self._exact_cache is not None:
+            self._exact_cache.put(
+                config.user_message, system_prompt, model,
+                config.temperature, config.max_tokens, response,
+            )
+        if self._semantic_cache is not None:
+            self._semantic_cache.put(config.user_message, response)
+
+        return response
 
     # ------------------------------------------------------------------
     # Stream  (sync / async)
@@ -158,8 +294,11 @@ class OpenAIDeveloperKit:
                     print(f"\\nTokens: {chunk.usage}")
         """
         prompt = self._resolve_prompt(config)
+        model = self._resolve_model(config.user_message)
+        config = self._apply_truncation(config, model)
+        adapter = self._get_adapter(model)
         client = self._sync_client()
-        request = self._adapter._build_request(
+        request = adapter._build_request(
             prompt,
             config.user_message,
             tools=config.tools,
@@ -194,8 +333,11 @@ class OpenAIDeveloperKit:
     async def astream(self, config: ChatConfig) -> AsyncIterator[StreamChunk]:
         """Async streaming — yields ``StreamChunk`` objects."""
         prompt = self._resolve_prompt(config)
+        model = self._resolve_model(config.user_message)
+        config = self._apply_truncation(config, model)
+        adapter = self._get_adapter(model)
         client = self._async_client()
-        request = self._adapter._build_request(
+        request = adapter._build_request(
             prompt,
             config.user_message,
             tools=config.tools,

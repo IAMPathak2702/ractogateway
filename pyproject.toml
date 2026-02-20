@@ -130,9 +130,15 @@ rag-all = [
     "ractogateway[rag-voyage]",
 ]
 
+# ── Performance / cost-optimisation (optional) ────────────────────────────────
+# tiktoken enables exact token counting in TokenTruncator (OpenAI models).
+# Without it, the built-in len//4 approximation is used automatically.
+cache = ["tiktoken>=0.7,<1.0"]
+
 dev = [
     "ractogateway[all]",
     "ractogateway[rag]",
+    "ractogateway[cache]",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
@@ -209,6 +215,9 @@ known-first-party = ["ractogateway"]
 "src/ractogateway/rag/stores/faiss_store.py" = ["S301", "S403"] # pickle used for local persistence
 "src/ractogateway/rag/stores/pgvector_store.py" = ["S608"]    # SQL string formatting is parameterised
 "src/ractogateway/rag/chunkers/recursive_chunker.py" = ["PLR0912"] # chunking algorithm needs branching
+# Batch processors: JSON parsing in result loop, long line URLs in JSONL body
+"src/ractogateway/batch/openai_batch.py" = ["S603", "PLR0912", "E501"]
+"src/ractogateway/batch/anthropic_batch.py" = ["PLR0911", "PLR0912"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -243,6 +252,8 @@ module = [
     "pgvector.*",
     "voyageai.*",
     "numpy.*",
+    # Performance extras
+    "tiktoken.*",
 ]
 ignore_missing_imports = true
 

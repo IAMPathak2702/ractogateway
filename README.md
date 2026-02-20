@@ -29,7 +29,13 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 - [Switching Providers](#switching-providers)
 - [Fine-Tuning](#fine-tuning)
 - [RAG — Retrieval-Augmented Generation](#rag)
-- [Architecture](#architecture)
+- [Performance & Cost Optimization](#performance--cost-optimization)
+  - [Exact-Match Cache](#exact-match-cache)
+  - [Semantic Cache](#semantic-cache)
+  - [Cost-Aware Routing](#cost-aware-routing)
+  - [Token Truncation](#token-truncation)
+  - [Batch Processing](#batch-processing)
+  - [Combining All Optimizations](#combining-all-optimizations)
 - [Environment Variables](#environment-variables)
 
 ---
@@ -48,6 +54,11 @@ RactoGateway solves this by providing:
 - **Streaming with typed chunks** — every `StreamChunk` has `.delta.text`, `.accumulated_text`, `.is_final`, `.usage`
 - **RAG pipeline** — ingest files, embed, store, retrieve, and generate answers with one class
 - **Low-level Gateway** — wraps any adapter for direct prompt execution without `ChatConfig`
+- **Exact-match cache** — SHA-256 LRU cache eliminates duplicate API calls with zero latency
+- **Semantic cache** — cosine-similarity cache returns cached answers for semantically equivalent queries
+- **Cost-aware routing** — `model="auto"` dynamically picks the cheapest model that can handle the request
+- **Token truncation** — automatically trims conversation history before hitting context limits
+- **Batch processing** — submit thousands of tasks at ~50 % cost via OpenAI & Anthropic Batch APIs
 
 ---
 
@@ -89,6 +100,9 @@ pip install ractogateway[rag-pgvector]  # PostgreSQL pgvector
 
 # RAG: embedding providers
 pip install ractogateway[rag-voyage]    # Voyage AI embeddings
+
+# Performance extras
+pip install ractogateway[cache]         # tiktoken for precise token counting
 
 # Development (all providers + testing + linting)
 pip install ractogateway[dev]
@@ -547,7 +561,7 @@ for chunk in kit.stream(gpt.ChatConfig(user_message="Explain Python generators")
 
 **Example output:**
 
-```
+```text
 A generator in Python is a special function that yields values one at a time,
 allowing you to iterate over a sequence without loading everything into memory.
 
@@ -2042,7 +2056,523 @@ for r in response.sources:
 
 ---
 
-## Architecture
+## Performance & Cost Optimization
+
+Five production-grade features that reduce latency, token spend, and API cost — all optional, zero-cost when not used, and available on every developer kit.
+
+| Feature | What it does | Cost saving |
+| --- | --- | --- |
+| **Exact-match cache** | Returns cached response for identical requests (SHA-256 key) | 100 % API cost for repeats |
+| **Semantic cache** | Returns cached response for semantically similar queries | 100 % API cost for near-duplicates |
+| **Cost-aware routing** | Picks cheapest model based on request complexity | 50–90 % on simple requests |
+| **Token truncation** | Trims history before context-window overflow | Prevents 400 errors + wasted tokens |
+| **Batch processing** | Queues thousands of tasks via provider Batch APIs | ~50 % off standard API pricing |
+
+All four middleware features (`exact_cache`, `semantic_cache`, `router`, `truncator`) are optional constructor parameters on every kit. None of them are active unless you pass them in.
+
+---
+
+### Exact-Match Cache
+
+An in-memory LRU cache keyed on `SHA-256(user_message + system_prompt + model + temperature + max_tokens)`. Identical requests return instantly — no API call, no latency, no cost.
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.cache import ExactMatchCache
+
+kit = gpt.Chat(
+    model="gpt-4o",
+    default_prompt=prompt,
+    exact_cache=ExactMatchCache(max_size=1024, ttl_seconds=3600),  # 1 h TTL, 1024 entries
+)
+
+config = gpt.ChatConfig(user_message="What is the capital of France?")
+
+r1 = kit.chat(config)
+print(r1.content)
+# "The capital of France is Paris."
+
+r2 = kit.chat(config)   # identical request → served from cache
+print(r2.content)
+# "The capital of France is Paris."    ← same answer, 0 ms, $0.00
+
+# Inspect cache performance
+stats = kit.exact_cache.stats
+print(stats)
+# CacheStats(hits=1, misses=1, size=1, hit_rate=50.0%)
+
+print(stats.hits)        # 1
+print(stats.misses)      # 1
+print(stats.hit_rate)    # 0.5
+print(stats.size)        # 1   (entries stored)
+```
+
+**`ExactMatchCache` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_size` | `int` | `1024` | Max entries before LRU eviction. `0` = unlimited |
+| `ttl_seconds` | `float \| None` | `None` | Seconds before an entry expires. `None` = never |
+
+**Cache methods:**
+
+| Method | Description |
+| --- | --- |
+| `get(key)` | Returns `LLMResponse` if hit, `None` if miss |
+| `put(key, response)` | Store a response |
+| `invalidate(key)` | Remove one entry |
+| `clear()` | Flush all entries |
+| `stats` | Returns `CacheStats(hits, misses, size)` |
+
+---
+
+### Semantic Cache
+
+Embeds the query and compares against stored embeddings using cosine similarity. If any stored query is ≥ `threshold` similar, the cached answer is returned — no API call needed. You wire in any embedding function you like (your RAG embedder, OpenAI embeddings, etc.).
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.cache import SemanticCache
+
+# Wire in any embedding function: Callable[[str], list[float]]
+def my_embedder(text: str) -> list[float]:
+    resp = gpt.Chat(model="gpt-4o").embed(
+        gpt.EmbeddingConfig(texts=[text])
+    )
+    return resp.vectors[0].vector
+
+kit = gpt.Chat(
+    model="gpt-4o",
+    default_prompt=prompt,
+    semantic_cache=SemanticCache(
+        embedder=my_embedder,
+        threshold=0.95,   # 95 % cosine similarity → cache hit
+        max_size=512,
+        ttl_seconds=1800,
+    ),
+)
+
+r1 = kit.chat(gpt.ChatConfig(user_message="What is the capital of France?"))
+print(r1.content)
+# "The capital of France is Paris."
+
+# Semantically equivalent — slightly different phrasing
+r2 = kit.chat(gpt.ChatConfig(user_message="Which city is the capital of France?"))
+print(r2.content)
+# "The capital of France is Paris."   ← cache hit, cosine sim ≥ 0.95
+
+stats = kit.semantic_cache.stats
+print(stats)
+# CacheStats(hits=1, misses=1, size=1, hit_rate=50.0%)
+```
+
+**`SemanticCache` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `embedder` | `Callable[[str], list[float]]` | required | Any function that returns a float vector for a text |
+| `threshold` | `float` | `0.95` | Minimum cosine similarity (0.0–1.0) to declare a hit |
+| `max_size` | `int` | `512` | Max entries before LRU eviction. `0` = unlimited |
+| `ttl_seconds` | `float \| None` | `None` | Seconds before an entry expires. `None` = never |
+
+> **Tip:** You can use the RAG embedders directly: `from ractogateway.rag.embedders import OpenAIEmbedder` — call `embedder.embed([text])` and return `result[0]`.
+
+---
+
+### Cost-Aware Routing
+
+Set `model="auto"` and provide a `CostAwareRouter` with an ordered tier list. Each incoming message receives a complexity score (0–100) based on estimated token length and keyword analysis. The router picks the **first tier** whose `max_score` covers the score — so simple messages go to cheap models automatically.
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.routing import CostAwareRouter, RoutingTier
+
+# Define tiers sorted cheapest → most capable (ascending max_score)
+router = CostAwareRouter(tiers=[
+    RoutingTier(model="gpt-4o-mini", max_score=30),   # short / simple
+    RoutingTier(model="gpt-4o",      max_score=70),   # medium complexity
+    RoutingTier(model="o3-mini",     max_score=100),  # long / complex (catch-all)
+])
+
+kit = gpt.Chat(
+    model="auto",            # ← triggers routing
+    default_prompt=prompt,
+    router=router,
+)
+
+# Short, simple question → score ~10 → routes to gpt-4o-mini
+r1 = kit.chat(gpt.ChatConfig(user_message="What is 2+2?"))
+print(r1.content)
+# "4"
+# Routed to: gpt-4o-mini   (cheapest tier)
+
+# Long, technical question → score ~65 → routes to gpt-4o
+r2 = kit.chat(gpt.ChatConfig(
+    user_message=(
+        "Explain the difference between RLHF, DPO, and PPO in the context of "
+        "fine-tuning large language models for instruction following."
+    )
+))
+print(r2.content)
+# "RLHF (Reinforcement Learning from Human Feedback) is..."
+# Routed to: gpt-4o
+
+# Check which model was actually used
+print(r2.raw.model)
+# "gpt-4o"
+```
+
+**Works identically with Google and Anthropic kits:**
+
+```python
+from ractogateway import anthropic_developer_kit as claude
+from ractogateway.routing import CostAwareRouter, RoutingTier
+
+router = CostAwareRouter(tiers=[
+    RoutingTier(model="claude-haiku-4-5-20251001", max_score=40),
+    RoutingTier(model="claude-sonnet-4-6",         max_score=100),
+])
+
+kit = claude.Chat(model="auto", default_prompt=prompt, router=router)
+```
+
+**`RoutingTier` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | `str` | required | Provider model identifier for this tier |
+| `max_score` | `int` | `100` | Inclusive upper-bound complexity score (0–100). Last tier should always be `100` |
+
+**Routing score algorithm:**
+
+| Signal | Weight | Notes |
+| --- | --- | --- |
+| Token estimate | up to 60 pts | `len(text) // 4` tokens, saturates at 400 tokens |
+| Keyword hits | up to 40 pts | Matches against 25 complexity keywords (e.g. `"analyze"`, `"compare"`, `"optimize"`) |
+
+---
+
+### Token Truncation
+
+Automatically trims conversation history when it approaches the model's context limit. Uses a sliding-window strategy: always keeps the first `keep_first_n` messages (system context) and the last `keep_last_n` messages (recent context), dropping the middle.
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.truncation import TokenTruncator, TruncationConfig
+
+truncator = TokenTruncator(TruncationConfig(
+    keep_first_n=2,       # always keep the 2 oldest history messages
+    keep_last_n=8,        # always keep the 8 most recent messages
+    safety_margin=512,    # reserve 512 tokens for the completion
+))
+
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt, truncator=truncator)
+
+# Build a very long history (simulating a long conversation)
+history = [
+    gpt.Message(role=gpt.MessageRole.USER,      content=f"Question {i}")
+    for i in range(200)
+]
+
+# The truncator silently trims history before sending to the API
+response = kit.chat(gpt.ChatConfig(
+    user_message="Summarize our conversation.",
+    history=history,   # 200 messages — would overflow context without truncation
+))
+print(response.content)
+# "Our conversation covered Questions 0 through 199..."
+# History was automatically trimmed to fit within the context window.
+```
+
+**`TruncationConfig` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_context_tokens` | `int \| None` | `None` | Override context limit. `None` = auto-detect from model name |
+| `keep_first_n` | `int` | `2` | History messages always kept from the start |
+| `keep_last_n` | `int` | `6` | History messages always kept from the end |
+| `safety_margin` | `int` | `512` | Token buffer reserved for the completion |
+| `token_counter` | `Callable[[str], int] \| None` | `None` | Custom token counter. `None` = `len(text) // 4` approximation |
+
+**Built-in context limits (auto-detected by model name):**
+
+| Model | Context tokens |
+| --- | --- |
+| `gpt-4o`, `gpt-4o-*` | 128,000 |
+| `gpt-4-turbo*` | 128,000 |
+| `gpt-4` | 8,192 |
+| `gpt-3.5-turbo` | 16,385 |
+| `gemini-2.0-flash*` | 1,048,576 |
+| `gemini-1.5-pro*` | 2,097,152 |
+| `claude-*` (opus, sonnet, haiku) | 200,000 |
+
+**Exact token counting with tiktoken (OpenAI models):**
+
+```python
+import tiktoken
+from ractogateway.truncation import TokenTruncator, TruncationConfig
+
+enc = tiktoken.encoding_for_model("gpt-4o")
+
+truncator = TokenTruncator(TruncationConfig(
+    token_counter=lambda text: len(enc.encode(text)),   # exact count
+    keep_first_n=2,
+    keep_last_n=10,
+))
+```
+
+Install tiktoken: `pip install ractogateway[cache]`
+
+---
+
+### Batch Processing
+
+Submit thousands of non-urgent requests using provider Batch APIs at approximately **50 % of standard API cost**. Jobs are processed asynchronously — you submit, poll for completion, then retrieve results.
+
+#### OpenAI Batch Processor
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway import RactoPrompt
+from ractogateway.batch import OpenAIBatchProcessor, BatchItem
+
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer the user's question briefly.",
+    constraints=["Be concise."],
+    tone="Friendly",
+    output_format="text",
+)
+
+processor = OpenAIBatchProcessor(
+    model="gpt-4o-mini",
+    default_prompt=prompt,
+)
+
+# Build your batch
+items = [
+    BatchItem(custom_id="q1", user_message="What is the capital of France?"),
+    BatchItem(custom_id="q2", user_message="What is 2 + 2?"),
+    BatchItem(custom_id="q3", user_message="Explain Python decorators in one sentence."),
+]
+
+# Submit and block until complete (poll every 60 s, timeout 24 h)
+results = processor.submit_and_wait(items, prompt=prompt)
+
+for r in results:
+    if r.ok:
+        print(f"{r.custom_id}: {r.response.content}")
+    else:
+        print(f"{r.custom_id}: ERROR — {r.error}")
+
+# Output:
+# q1: The capital of France is Paris.
+# q2: 4
+# q3: A decorator is a function that wraps another function to extend its behavior without modifying it.
+```
+
+**Fine-grained control (submit → poll → fetch separately):**
+
+```python
+# 1. Submit — returns immediately
+job = processor.submit_batch(items, prompt=prompt)
+print(job.job_id)      # "batch_abc123"
+print(job.status)      # BatchStatus.IN_PROGRESS
+print(job.created_at)  # 1740000000.0  (Unix timestamp)
+
+# 2. Poll until done
+import time
+while True:
+    job = processor.poll_status(job.job_id)
+    print(job.status)  # BatchStatus.IN_PROGRESS / FINALIZING / COMPLETED
+    if job.status.value == "completed":
+        break
+    time.sleep(60)
+
+# 3. Fetch results
+results = processor.get_results(job.job_id)
+```
+
+**Async variant:**
+
+```python
+import asyncio
+
+async def run():
+    results = await processor.asubmit_and_wait(
+        items,
+        prompt=prompt,
+        poll_interval_s=30.0,   # check every 30 s
+    )
+    for r in results:
+        print(r.custom_id, r.response.content if r.ok else r.error)
+
+asyncio.run(run())
+```
+
+#### Anthropic Batch Processor
+
+```python
+from ractogateway import anthropic_developer_kit as claude
+from ractogateway.batch import AnthropicBatchProcessor, BatchItem
+
+processor = AnthropicBatchProcessor(
+    model="claude-haiku-4-5-20251001",   # cheapest Claude model
+    default_prompt=prompt,
+)
+
+items = [
+    BatchItem(custom_id="task1", user_message="Summarize quantum computing in 2 sentences."),
+    BatchItem(custom_id="task2", user_message="List 3 benefits of exercise."),
+]
+
+results = processor.submit_and_wait(items)
+
+for r in results:
+    if r.ok:
+        print(f"[{r.custom_id}] {r.response.content}")
+    else:
+        print(f"[{r.custom_id}] FAILED: {r.error}")
+
+# Output:
+# [task1] Quantum computing uses quantum mechanics principles like superposition and
+#         entanglement to perform computations far beyond classical computers' reach.
+#         It promises breakthroughs in cryptography, drug discovery, and optimization.
+# [task2] 1. Improves cardiovascular health  2. Boosts mood  3. Increases energy levels
+```
+
+**`BatchItem` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `custom_id` | `str` | required | Your identifier for this request (returned in results) |
+| `user_message` | `str` | required | The user turn content |
+| `temperature` | `float` | `0.0` | Sampling temperature |
+| `max_tokens` | `int` | `4096` | Max completion tokens |
+| `extra` | `dict` | `{}` | Provider-specific pass-through parameters |
+
+**`BatchResult` fields:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `custom_id` | `str` | Your identifier from `BatchItem` |
+| `response` | `LLMResponse \| None` | Parsed response (populated on success) |
+| `error` | `str \| None` | Error message (populated on failure) |
+| `ok` | `bool` | `True` if the request succeeded |
+| `raw` | `Any` | Unmodified provider result object |
+
+**`BatchStatus` values:**
+
+| Value | Description |
+| --- | --- |
+| `PENDING` | Job created, not yet submitted |
+| `IN_PROGRESS` | Provider is processing |
+| `FINALIZING` | OpenAI is preparing results |
+| `COMPLETED` | All results available |
+| `FAILED` | Job failed |
+| `EXPIRED` | Job expired before completion |
+| `CANCELLING` | Cancellation in progress |
+| `CANCELLED` | Job was cancelled |
+
+---
+
+### Combining All Optimizations
+
+All four middleware features can be stacked on the same kit. The pipeline runs in this order on every `chat()` / `achat()` call:
+
+```text
+TokenTruncator → ExactMatchCache → SemanticCache → CostAwareRouter → API call → write caches
+```
+
+Cache hits short-circuit the pipeline — if an exact or semantic match is found, the API call and router are never invoked.
+
+```python
+import tiktoken
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
+from ractogateway.cache import ExactMatchCache, SemanticCache
+from ractogateway.routing import CostAwareRouter, RoutingTier
+from ractogateway.truncation import TokenTruncator, TruncationConfig
+
+# --- Embedding function (reuse your RAG embedder or any provider) ---
+embed_kit = gpt.Chat(model="gpt-4o")
+
+def embedder(text: str) -> list[float]:
+    return embed_kit.embed(gpt.EmbeddingConfig(texts=[text])).vectors[0].vector
+
+# --- Token counter (exact, via tiktoken) ---
+enc = tiktoken.encoding_for_model("gpt-4o")
+
+# --- Build the fully optimized kit ---
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer the user's question clearly and concisely.",
+    constraints=["Never fabricate facts."],
+    tone="Friendly",
+    output_format="text",
+)
+
+kit = gpt.Chat(
+    model="auto",                         # cost-aware routing enabled
+    default_prompt=prompt,
+
+    exact_cache=ExactMatchCache(          # identical-request cache
+        max_size=2048,
+        ttl_seconds=3600,                 # 1 h
+    ),
+    semantic_cache=SemanticCache(         # near-duplicate cache
+        embedder=embedder,
+        threshold=0.95,
+        max_size=512,
+        ttl_seconds=1800,                 # 30 min
+    ),
+    router=CostAwareRouter(tiers=[        # complexity-based model routing
+        RoutingTier(model="gpt-4o-mini", max_score=30),
+        RoutingTier(model="gpt-4o",      max_score=100),
+    ]),
+    truncator=TokenTruncator(TruncationConfig(
+        token_counter=lambda t: len(enc.encode(t)),
+        keep_first_n=2,
+        keep_last_n=8,
+        safety_margin=512,
+    )),
+)
+
+# First call — cache miss, router picks cheapest model
+r1 = kit.chat(gpt.ChatConfig(user_message="What is Python?"))
+print(r1.content)
+# "Python is a high-level, interpreted programming language..."
+# → exact cache miss, semantic cache miss, routed to gpt-4o-mini
+
+# Identical call — exact cache hit, 0 ms, $0.00
+r2 = kit.chat(gpt.ChatConfig(user_message="What is Python?"))
+print(r2.content)
+# "Python is a high-level, interpreted programming language..."
+# → exact cache HIT
+
+# Semantically equivalent phrasing — semantic cache hit
+r3 = kit.chat(gpt.ChatConfig(user_message="Can you explain what Python is?"))
+print(r3.content)
+# "Python is a high-level, interpreted programming language..."
+# → semantic cache HIT (cosine sim ≥ 0.95)
+
+# Print combined stats
+print("Exact cache:", kit.exact_cache.stats)
+# Exact cache: CacheStats(hits=1, misses=1, size=1, hit_rate=50.0%)
+
+print("Semantic cache:", kit.semantic_cache.stats)
+# Semantic cache: CacheStats(hits=1, misses=1, size=1, hit_rate=50.0%)
+```
+
+**Combined savings summary:**
+
+| Scenario | Without optimization | With optimization |
+| --- | --- | --- |
+| 1,000 identical queries | 1,000 API calls | 1 API call + 999 cache hits |
+| 1,000 semantically similar queries | 1,000 API calls | ~1–5 API calls + 995–999 cache hits |
+| Mixed complexity (80 % simple) | 1,000 × expensive model | 800 × cheap model + 200 × expensive model |
+| 10,000 non-urgent tasks | 10,000 standard calls | 10,000 batch calls (~50 % cost) |
+
+---
 
 ```text
 src/ractogateway/
