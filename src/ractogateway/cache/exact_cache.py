@@ -30,9 +30,7 @@ def _make_key(
     Hashing avoids key-size bloat while remaining collision-resistant for
     practical workloads.  The digest is hex-encoded (64 chars).
     """
-    raw = "\x00".join(
-        [user_message, system_prompt, model, str(temperature), str(max_tokens)]
-    )
+    raw = "\x00".join([user_message, system_prompt, model, str(temperature), str(max_tokens)])
     return hashlib.sha256(raw.encode()).hexdigest()
 
 

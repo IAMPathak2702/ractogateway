@@ -215,9 +215,7 @@ class AnthropicBatchProcessor:
     def _resolve_prompt(self, prompt: RactoPrompt | None) -> RactoPrompt:
         p = prompt or self._default_prompt
         if p is None:
-            raise ValueError(
-                "No prompt provided and no default_prompt on the processor."
-            )
+            raise ValueError("No prompt provided and no default_prompt on the processor.")
         return p
 
     # ------------------------------------------------------------------

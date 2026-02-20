@@ -111,13 +111,15 @@ class TokenTruncator:
             return chat_config
 
         # Build the trimmed history list
-        trimmed = list(self._sliding_window(
-            history=history,
-            history_tokens=history_tokens,
-            budget=budget - fixed_tokens,
-            first_n=first_n,
-            last_n=last_n,
-        ))
+        trimmed = list(
+            self._sliding_window(
+                history=history,
+                history_tokens=history_tokens,
+                budget=budget - fixed_tokens,
+                first_n=first_n,
+                last_n=last_n,
+            )
+        )
 
         return chat_config.model_copy(update={"history": trimmed})
 

@@ -112,7 +112,11 @@ def _parse_result(line_data: dict[str, Any]) -> BatchResult:
     error_obj = line_data.get("error")
 
     if error_obj:
-        err_msg = str(error_obj.get("message", error_obj)) if isinstance(error_obj, dict) else str(error_obj)
+        err_msg = (
+            str(error_obj.get("message", error_obj))
+            if isinstance(error_obj, dict)
+            else str(error_obj)
+        )
         return BatchResult(custom_id=custom_id, error=err_msg, raw=line_data)
 
     response_data = line_data.get("response", {})
@@ -232,9 +236,7 @@ class OpenAIBatchProcessor:
     def _resolve_prompt(self, prompt: RactoPrompt | None) -> RactoPrompt:
         p = prompt or self._default_prompt
         if p is None:
-            raise ValueError(
-                "No prompt provided and no default_prompt on the processor."
-            )
+            raise ValueError("No prompt provided and no default_prompt on the processor.")
         return p
 
     # ------------------------------------------------------------------
@@ -458,9 +460,7 @@ class OpenAIBatchProcessor:
             raise _wrap_provider_error(exc, "openai") from exc
 
         if batch.status != "completed":
-            raise RuntimeError(
-                f"Batch {job_id!r} is not completed yet (status={batch.status!r})."
-            )
+            raise RuntimeError(f"Batch {job_id!r} is not completed yet (status={batch.status!r}).")
         if not batch.output_file_id:
             raise RuntimeError(f"Batch {job_id!r} has no output file.")
 

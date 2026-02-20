@@ -92,9 +92,7 @@ class TruncationConfig(BaseModel):
     max_context_tokens: int | None = Field(
         default=None,
         gt=0,
-        description=(
-            "Override context-window size.  None = auto-detect from model name."
-        ),
+        description=("Override context-window size.  None = auto-detect from model name."),
     )
     keep_first_n: int = Field(
         default=2,

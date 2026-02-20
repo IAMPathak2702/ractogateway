@@ -199,8 +199,11 @@ class OpenAIDeveloperKit:
         # Exact-match cache lookup
         if self._exact_cache is not None:
             cached = self._exact_cache.get(
-                config.user_message, system_prompt, model,
-                config.temperature, config.max_tokens,
+                config.user_message,
+                system_prompt,
+                model,
+                config.temperature,
+                config.max_tokens,
             )
             if cached is not None:
                 return cached
@@ -226,8 +229,12 @@ class OpenAIDeveloperKit:
         # Write to caches
         if self._exact_cache is not None:
             self._exact_cache.put(
-                config.user_message, system_prompt, model,
-                config.temperature, config.max_tokens, response,
+                config.user_message,
+                system_prompt,
+                model,
+                config.temperature,
+                config.max_tokens,
+                response,
             )
         if self._semantic_cache is not None:
             self._semantic_cache.put(config.user_message, response)
@@ -244,8 +251,11 @@ class OpenAIDeveloperKit:
         # Exact-match cache lookup
         if self._exact_cache is not None:
             cached = self._exact_cache.get(
-                config.user_message, system_prompt, model,
-                config.temperature, config.max_tokens,
+                config.user_message,
+                system_prompt,
+                model,
+                config.temperature,
+                config.max_tokens,
             )
             if cached is not None:
                 return cached
@@ -271,8 +281,12 @@ class OpenAIDeveloperKit:
         # Write to caches
         if self._exact_cache is not None:
             self._exact_cache.put(
-                config.user_message, system_prompt, model,
-                config.temperature, config.max_tokens, response,
+                config.user_message,
+                system_prompt,
+                model,
+                config.temperature,
+                config.max_tokens,
+                response,
             )
         if self._semantic_cache is not None:
             self._semantic_cache.put(config.user_message, response)
