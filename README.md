@@ -28,6 +28,7 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 - [Low-Level Gateway](#low-level-gateway)
 - [Switching Providers](#switching-providers)
 - [Fine-Tuning](#fine-tuning)
+- [MCP (Model Context Protocol)](#mcp-model-context-protocol)
 - [RAG — Retrieval-Augmented Generation](#rag)
 - [Performance & Cost Optimization](#performance--cost-optimization)
   - [Exact-Match Cache](#exact-match-cache)
@@ -100,6 +101,10 @@ pip install ractogateway[rag-pgvector]  # PostgreSQL pgvector
 
 # RAG: embedding providers
 pip install ractogateway[rag-voyage]    # Voyage AI embeddings
+
+# MCP extras
+pip install ractogateway[mcp]           # MCP core (stdio + SSE client)
+pip install ractogateway[mcp-sse]       # MCP SSE server (Starlette + Uvicorn)
 
 # Performance extras
 pip install ractogateway[cache]         # tiktoken for precise token counting
@@ -2632,6 +2637,208 @@ src/ractogateway/
 - **Sync + async parity** — Every method has both a synchronous and asynchronous variant.
 - **Provider-agnostic tool schemas** — Define tools once, use them with any provider. Internal adapters handle the translation.
 - **Auto-JSON parsing** — Response content is automatically stripped of markdown code fences and JSON is parsed — no `json.loads()` needed.
+
+---
+
+## MCP (Model Context Protocol)
+
+RactoGateway includes first-class MCP support for serving tools, consuming remote tools, and running automatic tool loops with OpenAI, Gemini, or Claude kits.
+
+### MCP Components
+
+| Component | What it does |
+| --- | --- |
+| `RactoMCPServer` | Exposes a `ToolRegistry` as an MCP server (`stdio` or `sse`). |
+| `RactoMCPClient` | Connects to one MCP server and calls tools. |
+| `MCPMultiClient` | Connects to multiple MCP servers and merges tools. |
+| `MCPAgent` | Runs `LLM -> tool -> continue` loops automatically. |
+| `MCPClientConfig` | Transport config (`stdio`, `sse`, `streamable-http`). |
+| `MCPServerConfig` | Server metadata (`name`, `description`, `version`). |
+| `MCPToolResult` | Normalized tool result (`content`, `is_error`). |
+
+### 1) Build an MCP server (stdio)
+
+```python
+from ractogateway import ToolRegistry
+from ractogateway.mcp import RactoMCPServer
+
+registry = ToolRegistry()
+
+@registry.register
+def add(a: int, b: int) -> int:
+    """Add two integers."""
+    return a + b
+
+server = RactoMCPServer.from_registry(registry, name="math-tools")
+server.run(transport="stdio")  # blocks; for subprocess MCP clients
+```
+
+**Input**
+
+```json
+{"tool": "add", "arguments": {"a": 7, "b": 5}}
+```
+
+**Output**
+
+```text
+12
+```
+
+### 2) Connect and call a tool (sync one-shot)
+
+```python
+from ractogateway.mcp import MCPClientConfig, RactoMCPClient
+
+config = MCPClientConfig(
+    transport="stdio",
+    command="python",
+    args=["-m", "my_package.math_server"],
+)
+
+client = RactoMCPClient(config)
+result = client.call_tool_sync("add", {"a": 20, "b": 22})
+
+print(result.content)
+print(result.is_error)
+```
+
+**Output**
+
+```text
+42
+False
+```
+
+### 3) Convert MCP tools to `ToolRegistry` and use with any kit
+
+```python
+import asyncio
+
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.mcp import MCPClientConfig, RactoMCPClient
+
+config = MCPClientConfig(
+    transport="stdio",
+    command="python",
+    args=["-m", "my_package.weather_server"],
+)
+
+async def load_registry():
+    async with RactoMCPClient(config) as client:
+        return await client.to_registry()
+
+registry = asyncio.run(load_registry())
+
+kit = gpt.Chat(model="gpt-4o")
+response = kit.chat(
+    gpt.ChatConfig(
+        user_message="What is weather in Tokyo?",
+        tools=registry,
+    )
+)
+print(response.content)
+```
+
+**Input**
+
+```text
+What is weather in Tokyo?
+```
+
+**Output (example)**
+
+```text
+Tokyo weather is 26C and clear skies.
+```
+
+### 4) Merge multiple MCP servers
+
+```python
+import asyncio
+
+from ractogateway.mcp import MCPClientConfig, MCPMultiClient
+
+configs = [
+    MCPClientConfig(transport="stdio", command="python", args=["-m", "pkg.math_server"]),
+    MCPClientConfig(transport="sse", url="http://localhost:8001/sse"),
+]
+
+async def main() -> None:
+    async with MCPMultiClient(configs) as multi:
+        tools = await multi.list_tools()
+        print([t.name for t in tools])
+
+        result = await multi.call_tool("add", {"a": 2, "b": 3})
+        print(result.content)
+
+asyncio.run(main())
+```
+
+**Output (example)**
+
+```text
+['add', 'search_docs', 'weather']
+5
+```
+
+### 5) Run `MCPAgent` (automatic tool loop)
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.mcp import MCPAgent, MCPClientConfig
+
+kit = gpt.Chat(model="gpt-4o")
+configs = [
+    MCPClientConfig(
+        transport="stdio",
+        command="python",
+        args=["-m", "my_package.math_server"],
+    )
+]
+
+agent = MCPAgent.from_mcp(kit, configs, max_turns=6)
+response = agent.run(gpt.ChatConfig(user_message="What is 45 + 55?"))
+print(response.content)
+```
+
+**Input**
+
+```text
+What is 45 + 55?
+```
+
+**Output (example)**
+
+```text
+45 + 55 = 100.
+```
+
+### SSE server mode
+
+If you want to host your MCP server over HTTP/SSE:
+
+```python
+from ractogateway import ToolRegistry
+from ractogateway.mcp import RactoMCPServer
+
+registry = ToolRegistry()
+
+@registry.register
+def ping() -> str:
+    return "pong"
+
+server = RactoMCPServer.from_registry(registry, name="network-tools")
+server.run(transport="sse", host="0.0.0.0", port=8000)
+```
+
+SSE endpoint: `http://localhost:8000/sse`
+
+### Important notes
+
+- Use `pip install ractogateway[mcp]` for MCP core support.
+- Use `pip install ractogateway[mcp-sse]` when running SSE server transport.
+- Sync helpers (`*_sync`) should not be called inside a running event loop.
 
 ---
 

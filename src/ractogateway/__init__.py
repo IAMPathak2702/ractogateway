@@ -16,6 +16,7 @@ if TYPE_CHECKING:
         cache,
         finetune,
         google_developer_kit,
+        mcp,
         openai_developer_kit,
         rag,
         routing,
@@ -43,6 +44,11 @@ if TYPE_CHECKING:
         RactoTrainingMessage,
     )
     from ractogateway.gateway.runner import Gateway
+    from ractogateway.mcp._models import MCPClientConfig, MCPServerConfig, MCPToolResult
+    from ractogateway.mcp.agent import MCPAgent
+    from ractogateway.mcp.client import RactoMCPClient
+    from ractogateway.mcp.multi_client import MCPMultiClient
+    from ractogateway.mcp.server import RactoMCPServer
     from ractogateway.prompts.engine import RactoFile, RactoPrompt
     from ractogateway.rag.chunkers.fixed_chunker import FixedChunker
     from ractogateway.rag.chunkers.recursive_chunker import RecursiveChunker
@@ -76,6 +82,7 @@ _MODULE_EXPORTS: dict[str, str] = {
     "cache": "ractogateway.cache",
     "finetune": "ractogateway.finetune",
     "google_developer_kit": "ractogateway.google_developer_kit",
+    "mcp": "ractogateway.mcp",
     "openai_developer_kit": "ractogateway.openai_developer_kit",
     "rag": "ractogateway.rag",
     "routing": "ractogateway.routing",
@@ -95,6 +102,14 @@ _ATTR_EXPORTS: dict[str, tuple[str, str]] = {
     "RactoDataset": ("ractogateway.finetune", "RactoDataset"),
     "RactoTrainingExample": ("ractogateway.finetune", "RactoTrainingExample"),
     "RactoTrainingMessage": ("ractogateway.finetune", "RactoTrainingMessage"),
+    # MCP
+    "MCPAgent": ("ractogateway.mcp.agent", "MCPAgent"),
+    "MCPClientConfig": ("ractogateway.mcp._models", "MCPClientConfig"),
+    "MCPMultiClient": ("ractogateway.mcp.multi_client", "MCPMultiClient"),
+    "MCPServerConfig": ("ractogateway.mcp._models", "MCPServerConfig"),
+    "MCPToolResult": ("ractogateway.mcp._models", "MCPToolResult"),
+    "RactoMCPClient": ("ractogateway.mcp.client", "RactoMCPClient"),
+    "RactoMCPServer": ("ractogateway.mcp.server", "RactoMCPServer"),
     # Core
     "Gateway": ("ractogateway.gateway.runner", "Gateway"),
     "LLMResponse": ("ractogateway.adapters.base", "LLMResponse"),
@@ -152,6 +167,14 @@ _ATTR_EXPORTS: dict[str, tuple[str, str]] = {
 }
 
 __all__ = [
+    # MCP — Model Context Protocol
+    "MCPAgent",
+    "MCPClientConfig",
+    "MCPMultiClient",
+    "MCPServerConfig",
+    "MCPToolResult",
+    "RactoMCPClient",
+    "RactoMCPServer",
     # Exceptions
     "RactoGatewayError",
     "RactoGatewayTimeoutError",
@@ -216,6 +239,7 @@ __all__ = [
     "cache",
     "finetune",
     "google_developer_kit",
+    "mcp",
     "openai_developer_kit",
     "rag",
     "routing",

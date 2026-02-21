@@ -49,6 +49,11 @@ keywords = [
     "voyage-ai",
     "chunking",
     "document-parsing",
+    "mcp",
+    "model-context-protocol",
+    "claude-desktop",
+    "tool-server",
+    "agentic",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -130,6 +135,12 @@ rag-all = [
     "ractogateway[rag-voyage]",
 ]
 
+# ── MCP (Model Context Protocol) ─────────────────────────────────────────────
+# Core: stdio + SSE client transport.
+mcp     = ["mcp>=1.0,<2.0"]
+# Server SSE transport: requires starlette ASGI framework + uvicorn web server.
+mcp-sse = ["mcp>=1.0,<2.0", "starlette>=0.41,<1.0", "uvicorn>=0.32,<1.0"]
+
 # ── Performance / cost-optimisation (optional) ────────────────────────────────
 # tiktoken enables exact token counting in TokenTruncator (OpenAI models).
 # Without it, the built-in len//4 approximation is used automatically.
@@ -139,6 +150,7 @@ dev = [
     "ractogateway[all]",
     "ractogateway[rag]",
     "ractogateway[cache]",
+    "ractogateway[mcp]",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
@@ -218,6 +230,11 @@ known-first-party = ["ractogateway"]
 # Batch processors: JSON parsing in result loop, long line URLs in JSONL body
 "src/ractogateway/batch/openai_batch.py" = ["S603", "PLR0912", "E501"]
 "src/ractogateway/batch/anthropic_batch.py" = ["PLR0911", "PLR0912"]
+# MCP: agentic loop branches; SLF001 for intentional private-attr access within package
+"src/ractogateway/mcp/agent.py" = ["PLR0912", "BLE001"]
+"src/ractogateway/mcp/multi_client.py" = ["PLR0912"]
+"src/ractogateway/mcp/client.py" = ["SLF001"]
+"src/ractogateway/mcp/server.py" = ["SLF001"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -254,6 +271,10 @@ module = [
     "numpy.*",
     # Performance extras
     "tiktoken.*",
+    # MCP
+    "mcp.*",
+    "starlette.*",
+    "uvicorn.*",
 ]
 ignore_missing_imports = true
 
