@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         celery,
         finetune,
         google_developer_kit,
+        kafka,
         mcp,
         openai_developer_kit,
         rag,
@@ -48,6 +49,19 @@ if TYPE_CHECKING:
         RactoTrainingMessage,
     )
     from ractogateway.gateway.runner import Gateway
+    from ractogateway.kafka._models import (
+        KafkaAuditEvent,
+        KafkaConsumerConfig,
+        KafkaMessage,
+        KafkaProducerConfig,
+        KafkaProduceResult,
+        KafkaPublishRequest,
+        KafkaStreamConfig,
+    )
+    from ractogateway.kafka.audit import KafkaAuditLogger
+    from ractogateway.kafka.consumer import KafkaConsumerClient
+    from ractogateway.kafka.producer import KafkaProducerClient
+    from ractogateway.kafka.stream import KafkaStreamProcessor
     from ractogateway.mcp._models import MCPClientConfig, MCPServerConfig, MCPToolResult
     from ractogateway.mcp.agent import MCPAgent
     from ractogateway.mcp.client import RactoMCPClient
@@ -91,6 +105,7 @@ _MODULE_EXPORTS: dict[str, str] = {
     "celery": "ractogateway.celery",
     "finetune": "ractogateway.finetune",
     "google_developer_kit": "ractogateway.google_developer_kit",
+    "kafka": "ractogateway.kafka",
     "mcp": "ractogateway.mcp",
     "openai_developer_kit": "ractogateway.openai_developer_kit",
     "rag": "ractogateway.rag",
@@ -164,6 +179,18 @@ _ATTR_EXPORTS: dict[str, tuple[str, str]] = {
     "RedisChatMemory": ("ractogateway.redis.chat_memory", "RedisChatMemory"),
     "RedisExactCache": ("ractogateway.redis.exact_cache", "RedisExactCache"),
     "RedisRateLimiter": ("ractogateway.redis.rate_limiter", "RedisRateLimiter"),
+    # Kafka streaming
+    "KafkaAuditEvent": ("ractogateway.kafka._models", "KafkaAuditEvent"),
+    "KafkaAuditLogger": ("ractogateway.kafka.audit", "KafkaAuditLogger"),
+    "KafkaConsumerClient": ("ractogateway.kafka.consumer", "KafkaConsumerClient"),
+    "KafkaConsumerConfig": ("ractogateway.kafka._models", "KafkaConsumerConfig"),
+    "KafkaMessage": ("ractogateway.kafka._models", "KafkaMessage"),
+    "KafkaProduceResult": ("ractogateway.kafka._models", "KafkaProduceResult"),
+    "KafkaProducerClient": ("ractogateway.kafka.producer", "KafkaProducerClient"),
+    "KafkaProducerConfig": ("ractogateway.kafka._models", "KafkaProducerConfig"),
+    "KafkaPublishRequest": ("ractogateway.kafka._models", "KafkaPublishRequest"),
+    "KafkaStreamConfig": ("ractogateway.kafka._models", "KafkaStreamConfig"),
+    "KafkaStreamProcessor": ("ractogateway.kafka.stream", "KafkaStreamProcessor"),
     # Routing
     "CostAwareRouter": ("ractogateway.routing.router", "CostAwareRouter"),
     "RoutingTier": ("ractogateway.routing._models", "RoutingTier"),
@@ -247,6 +274,18 @@ __all__ = [
     "RedisChatMemory",
     "RedisExactCache",
     "RedisRateLimiter",
+    # Kafka streaming
+    "KafkaAuditEvent",
+    "KafkaAuditLogger",
+    "KafkaConsumerClient",
+    "KafkaConsumerConfig",
+    "KafkaMessage",
+    "KafkaProduceResult",
+    "KafkaProducerClient",
+    "KafkaProducerConfig",
+    "KafkaPublishRequest",
+    "KafkaStreamConfig",
+    "KafkaStreamProcessor",
     # Routing
     "CostAwareRouter",
     "RoutingTier",
@@ -272,6 +311,7 @@ __all__ = [
     "celery",
     "finetune",
     "google_developer_kit",
+    "kafka",
     "mcp",
     "openai_developer_kit",
     "rag",

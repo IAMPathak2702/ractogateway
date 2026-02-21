@@ -33,6 +33,7 @@ def test_dir_exposes_public_api() -> None:
 
     assert "RactoPrompt" in public_names
     assert "rag" in public_names
+    assert "kafka" in public_names
 
 
 def test_unknown_attribute_raises_attribute_error() -> None:

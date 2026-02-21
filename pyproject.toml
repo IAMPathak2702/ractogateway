@@ -154,6 +154,7 @@ redis = ["redis>=5.0,<6.0"]
 # ── Celery task queue (optional) ──────────────────────────────────────────────
 # Background document ingestion, never-fail LLM retries, parallel batch inference.
 celery = ["celery>=5.3,<6.0"]
+kafka = ["kafka-python>=2.0,<3.0"]
 
 dev = [
     "ractogateway[all]",
@@ -161,6 +162,7 @@ dev = [
     "ractogateway[cache]",
     "ractogateway[redis]",
     "ractogateway[celery]",
+    "ractogateway[kafka]",
     "ractogateway[mcp]",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
@@ -291,6 +293,8 @@ module = [
     # Celery task queue
     "celery.*",
     "kombu.*",
+    # Kafka event streaming
+    "kafka.*",
     # MCP
     "mcp.*",
     "starlette.*",
