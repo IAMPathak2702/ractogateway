@@ -146,10 +146,21 @@ mcp-sse = ["mcp>=1.0,<2.0", "starlette>=0.41,<1.0", "uvicorn>=0.32,<1.0"]
 # Without it, the built-in len//4 approximation is used automatically.
 cache = ["tiktoken>=0.7,<1.0"]
 
+# ── Redis infrastructure (optional) ───────────────────────────────────────────
+# Distributed exact-match cache, token-bucket rate limiter, and sliding-window
+# chat memory — all backed by a shared Redis instance.
+redis = ["redis>=5.0,<6.0"]
+
+# ── Celery task queue (optional) ──────────────────────────────────────────────
+# Background document ingestion, never-fail LLM retries, parallel batch inference.
+celery = ["celery>=5.3,<6.0"]
+
 dev = [
     "ractogateway[all]",
     "ractogateway[rag]",
     "ractogateway[cache]",
+    "ractogateway[redis]",
+    "ractogateway[celery]",
     "ractogateway[mcp]",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
@@ -230,6 +241,10 @@ known-first-party = ["ractogateway"]
 # Batch processors: JSON parsing in result loop, long line URLs in JSONL body
 "src/ractogateway/batch/openai_batch.py" = ["S603", "PLR0912", "E501"]
 "src/ractogateway/batch/anthropic_batch.py" = ["PLR0911", "PLR0912"]
+# Redis: 5-param signatures mirror ExactMatchCache; SCAN-based clear is intentional
+"src/ractogateway/redis/exact_cache.py" = ["PLR0913"]
+# Celery: worker registers dynamic tasks via closures; BLE001 for broad except in wait()
+"src/ractogateway/celery/worker.py" = ["PLR0913", "BLE001"]
 # MCP: agentic loop branches; SLF001 for intentional private-attr access within package
 "src/ractogateway/mcp/agent.py" = ["PLR0912", "BLE001"]
 "src/ractogateway/mcp/multi_client.py" = ["PLR0912"]
@@ -271,6 +286,11 @@ module = [
     "numpy.*",
     # Performance extras
     "tiktoken.*",
+    # Redis infrastructure
+    "redis.*",
+    # Celery task queue
+    "celery.*",
+    "kombu.*",
     # MCP
     "mcp.*",
     "starlette.*",

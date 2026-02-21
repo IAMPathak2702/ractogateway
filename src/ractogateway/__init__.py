@@ -14,11 +14,13 @@ if TYPE_CHECKING:
         anthropic_developer_kit,
         batch,
         cache,
+        celery,
         finetune,
         google_developer_kit,
         mcp,
         openai_developer_kit,
         rag,
+        redis,
         routing,
         truncation,
     )
@@ -29,6 +31,8 @@ if TYPE_CHECKING:
     from ractogateway.cache._models import CacheConfig, CacheStats
     from ractogateway.cache.exact_cache import ExactMatchCache
     from ractogateway.cache.semantic_cache import SemanticCache
+    from ractogateway.celery._models import RetryConfig, TaskResult, TaskStatus
+    from ractogateway.celery.worker import RactoCeleryWorker
     from ractogateway.exceptions import (
         RactoGatewayAPIError,
         RactoGatewayAuthError,
@@ -70,6 +74,10 @@ if TYPE_CHECKING:
     from ractogateway.rag.stores.pinecone_store import PineconeStore
     from ractogateway.rag.stores.qdrant_store import QdrantStore
     from ractogateway.rag.stores.weaviate_store import WeaviateStore
+    from ractogateway.redis._models import ChatMemoryConfig, RateLimitConfig
+    from ractogateway.redis.chat_memory import RedisChatMemory
+    from ractogateway.redis.exact_cache import RedisExactCache
+    from ractogateway.redis.rate_limiter import RedisRateLimiter
     from ractogateway.routing._models import RoutingTier
     from ractogateway.routing.router import CostAwareRouter
     from ractogateway.tools.registry import ToolRegistry, tool
@@ -80,11 +88,13 @@ _MODULE_EXPORTS: dict[str, str] = {
     "anthropic_developer_kit": "ractogateway.anthropic_developer_kit",
     "batch": "ractogateway.batch",
     "cache": "ractogateway.cache",
+    "celery": "ractogateway.celery",
     "finetune": "ractogateway.finetune",
     "google_developer_kit": "ractogateway.google_developer_kit",
     "mcp": "ractogateway.mcp",
     "openai_developer_kit": "ractogateway.openai_developer_kit",
     "rag": "ractogateway.rag",
+    "redis": "ractogateway.redis",
     "routing": "ractogateway.routing",
     "truncation": "ractogateway.truncation",
 }
@@ -148,12 +158,23 @@ _ATTR_EXPORTS: dict[str, tuple[str, str]] = {
     "CacheStats": ("ractogateway.cache._models", "CacheStats"),
     "ExactMatchCache": ("ractogateway.cache.exact_cache", "ExactMatchCache"),
     "SemanticCache": ("ractogateway.cache.semantic_cache", "SemanticCache"),
+    # Redis infrastructure
+    "ChatMemoryConfig": ("ractogateway.redis._models", "ChatMemoryConfig"),
+    "RateLimitConfig": ("ractogateway.redis._models", "RateLimitConfig"),
+    "RedisChatMemory": ("ractogateway.redis.chat_memory", "RedisChatMemory"),
+    "RedisExactCache": ("ractogateway.redis.exact_cache", "RedisExactCache"),
+    "RedisRateLimiter": ("ractogateway.redis.rate_limiter", "RedisRateLimiter"),
     # Routing
     "CostAwareRouter": ("ractogateway.routing.router", "CostAwareRouter"),
     "RoutingTier": ("ractogateway.routing._models", "RoutingTier"),
     # Truncation
     "TokenTruncator": ("ractogateway.truncation.truncator", "TokenTruncator"),
     "TruncationConfig": ("ractogateway.truncation._models", "TruncationConfig"),
+    # Celery task queue
+    "RactoCeleryWorker": ("ractogateway.celery.worker", "RactoCeleryWorker"),
+    "RetryConfig": ("ractogateway.celery._models", "RetryConfig"),
+    "TaskResult": ("ractogateway.celery._models", "TaskResult"),
+    "TaskStatus": ("ractogateway.celery._models", "TaskStatus"),
     # Batch
     "AnthropicBatchProcessor": (
         "ractogateway.batch.anthropic_batch",
@@ -220,12 +241,23 @@ __all__ = [
     "CacheStats",
     "ExactMatchCache",
     "SemanticCache",
+    # Redis infrastructure
+    "ChatMemoryConfig",
+    "RateLimitConfig",
+    "RedisChatMemory",
+    "RedisExactCache",
+    "RedisRateLimiter",
     # Routing
     "CostAwareRouter",
     "RoutingTier",
     # Truncation
     "TokenTruncator",
     "TruncationConfig",
+    # Celery task queue
+    "RactoCeleryWorker",
+    "RetryConfig",
+    "TaskResult",
+    "TaskStatus",
     # Batch
     "AnthropicBatchProcessor",
     "BatchItem",
@@ -237,11 +269,13 @@ __all__ = [
     "anthropic_developer_kit",
     "batch",
     "cache",
+    "celery",
     "finetune",
     "google_developer_kit",
     "mcp",
     "openai_developer_kit",
     "rag",
+    "redis",
     "routing",
     "truncation",
 ]

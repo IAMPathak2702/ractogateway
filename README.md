@@ -37,6 +37,16 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
   - [Token Truncation](#token-truncation)
   - [Batch Processing](#batch-processing)
   - [Combining All Optimizations](#combining-all-optimizations)
+- [Redis Infrastructure](#redis-infrastructure)
+  - [RedisExactCache — Distributed Response Cache](#redisexactcache--distributed-response-cache)
+  - [RedisRateLimiter — Fleet-Wide Rate Limiting](#redisratelimiter--fleet-wide-rate-limiting)
+  - [RedisChatMemory — Sliding-Window Conversation History](#redischatmemory--sliding-window-conversation-history)
+  - [Production Pattern — Combining Redis Utilities](#production-pattern--combining-redis-utilities)
+- [Celery Task Queue](#celery-task-queue)
+  - [Never-Fail LLM Generation](#never-fail-llm-generation)
+  - [Background Document Ingestion](#background-document-ingestion)
+  - [Parallel Batch Inference](#parallel-batch-inference)
+  - [RetryConfig — Exponential Backoff Policy](#retryconfig--exponential-backoff-policy)
 - [Environment Variables](#environment-variables)
 
 ---
@@ -60,6 +70,10 @@ RactoGateway solves this by providing:
 - **Cost-aware routing** — `model="auto"` dynamically picks the cheapest model that can handle the request
 - **Token truncation** — automatically trims conversation history before hitting context limits
 - **Batch processing** — submit thousands of tasks at ~50 % cost via OpenAI & Anthropic Batch APIs
+- **Redis distributed cache** — drop-in `RedisExactCache` shares the response cache across all servers in a fleet
+- **Redis rate limiter** — fleet-wide token-budget enforcement per user ID, safe across concurrent processes
+- **Redis chat memory** — sliding-window conversation history backed by Redis Lists, survives rolling deployments
+- **Celery task queue** — background generation, retry-safe workflows, and parallel inference across worker nodes
 
 ---
 
@@ -108,6 +122,12 @@ pip install ractogateway[mcp-sse]       # MCP SSE server (Starlette + Uvicorn)
 
 # Performance extras
 pip install ractogateway[cache]         # tiktoken for precise token counting
+
+# Redis infrastructure (distributed cache, rate limiter, chat memory)
+pip install ractogateway[redis]
+
+# Celery task queue (background jobs + retries + parallel fan-out)
+pip install ractogateway[celery]
 
 # Development (all providers + testing + linting)
 pip install ractogateway[dev]
@@ -2075,6 +2095,8 @@ Five production-grade features that reduce latency, token spend, and API cost �
 
 All four middleware features (`exact_cache`, `semantic_cache`, `router`, `truncator`) are optional constructor parameters on every kit. None of them are active unless you pass them in.
 
+> **Multi-server deployments?** See the [Redis Infrastructure](#redis-infrastructure) section for distributed versions of the exact-match cache, rate limiter, and chat memory that work across an entire fleet.
+
 ---
 
 ### Exact-Match Cache
@@ -2619,6 +2641,16 @@ src/ractogateway/
 ├── anthropic_developer_kit/             # Anthropic Developer Kit (import as claude)
 │   └── kit.py                           #   AnthropicDeveloperKit (Chat alias)
 │
+├── redis/                               # Redis Infrastructure (pip install ractogateway[redis])
+│   ├── _models.py                       #   RateLimitConfig, ChatMemoryConfig
+│   ├── exact_cache.py                   #   RedisExactCache (drop-in for ExactMatchCache)
+│   ├── rate_limiter.py                  #   RedisRateLimiter (fleet-wide token-bucket)
+│   └── chat_memory.py                   #   RedisChatMemory (sliding-window conversation history)
+│
+├── celery/                              # Celery Task Queue (pip install ractogateway[celery])
+│   ├── _models.py                       #   TaskStatus, TaskResult, RetryConfig
+│   └── worker.py                        #   RactoCeleryWorker (generate, ingest_document, parallel_batch)
+│
 └── rag/                                 # RAG Pipeline
     ├── pipeline.py                      #   RactoRAG
     ├── _models/                         #   Document, Chunk, ChunkMetadata, RetrievalResult, RAGResponse
@@ -2673,13 +2705,13 @@ server = RactoMCPServer.from_registry(registry, name="math-tools")
 server.run(transport="stdio")  # blocks; for subprocess MCP clients
 ```
 
-**Input**
+#### Input
 
 ```json
 {"tool": "add", "arguments": {"a": 7, "b": 5}}
 ```
 
-**Output**
+#### Output
 
 ```text
 12
@@ -2703,7 +2735,7 @@ print(result.content)
 print(result.is_error)
 ```
 
-**Output**
+#### Output
 
 ```text
 42
@@ -2740,13 +2772,13 @@ response = kit.chat(
 print(response.content)
 ```
 
-**Input**
+#### Input
 
 ```text
 What is weather in Tokyo?
 ```
 
-**Output (example)**
+#### Output (Example)
 
 ```text
 Tokyo weather is 26C and clear skies.
@@ -2775,7 +2807,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-**Output (example)**
+#### Output (Example)
 
 ```text
 ['add', 'search_docs', 'weather']
@@ -2802,13 +2834,13 @@ response = agent.run(gpt.ChatConfig(user_message="What is 45 + 55?"))
 print(response.content)
 ```
 
-**Input**
+#### Input
 
 ```text
 What is 45 + 55?
 ```
 
-**Output (example)**
+#### Output (Example)
 
 ```text
 45 + 55 = 100.
@@ -2839,6 +2871,440 @@ SSE endpoint: `http://localhost:8000/sse`
 - Use `pip install ractogateway[mcp]` for MCP core support.
 - Use `pip install ractogateway[mcp-sse]` when running SSE server transport.
 - Sync helpers (`*_sync`) should not be called inside a running event loop.
+
+---
+
+## Redis Infrastructure
+
+Three production-ready utilities that replace or complement the built-in in-process modules when running across **multiple servers**. All three require only `pip install ractogateway[redis]` — no other configuration.
+
+| Class | What it does | Replaces |
+| --- | --- | --- |
+| `RedisExactCache` | Distributed response cache — shared across every server in your fleet | `ExactMatchCache` (in-process only) |
+| `RedisRateLimiter` | Fleet-wide token-budget rate limiting per user ID | Custom per-server solutions |
+| `RedisChatMemory` | Sliding-window conversation history in a Redis List | In-memory `dict` approaches |
+
+```bash
+pip install ractogateway[redis]
+```
+
+---
+
+### RedisExactCache — Distributed Response Cache
+
+A **drop-in replacement** for `ExactMatchCache` with an identical public API. Swap it in wherever `ExactMatchCache` is accepted — including all developer-kit `exact_cache=` parameters — without changing any other code.
+
+The cache is stored in Redis, so every server in your fleet reads from and writes to the same shared store. Responses cached by one replica are instantly available to all others.
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.redis import RedisExactCache
+
+cache = RedisExactCache(
+    url="redis://localhost:6379/0",
+    ttl_seconds=3600,    # entries expire after 1 hour
+)
+
+# Wire it in exactly like ExactMatchCache — nothing else changes
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt, exact_cache=cache)
+
+config = gpt.ChatConfig(user_message="What is the capital of France?")
+
+r1 = kit.chat(config)
+print(r1.content)
+# "The capital of France is Paris."   ← Redis miss, API call made
+
+r2 = kit.chat(config)
+print(r2.content)
+# "The capital of France is Paris."   ← Redis hit, $0.00, < 1 ms
+
+# Works identically on a second server replica — cache is shared
+stats = cache.stats
+print(stats.hit_rate)   # 0.5
+```
+
+**`RedisExactCache` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | `str` | `"redis://localhost:6379/0"` | Redis connection URL. Ignored when `client` is provided |
+| `client` | `redis.Redis \| None` | `None` | Pre-built Redis client (useful for connection-pool sharing or mocking) |
+| `ttl_seconds` | `float \| None` | `None` | Entry TTL passed to Redis `SET EX`. `None` = never expire |
+| `key_prefix` | `str` | `"ractogateway:exact"` | Redis key namespace — change to avoid collisions between apps |
+
+**Methods (identical to `ExactMatchCache`):**
+
+| Method | Description |
+| --- | --- |
+| `get(user_message, system_prompt, model, temperature, max_tokens)` | Returns `LLMResponse` on hit, `None` on miss |
+| `put(user_message, system_prompt, model, temperature, max_tokens, response)` | Store a response in Redis |
+| `invalidate(...)` | Remove one specific entry. Returns `True` if it was present |
+| `clear()` | Delete all entries matching the key prefix (uses `SCAN`, not `KEYS *`) |
+| `stats` | Returns `CacheStats(hits, misses, size)` — hits/misses are in-memory counters |
+
+---
+
+### RedisRateLimiter — Fleet-Wide Rate Limiting
+
+Enforces a **token budget per user ID** across every server in your fleet simultaneously. Uses a sliding 1-minute window via `INCRBY + EXPIRE` in a Redis pipeline — no Lua script, no race conditions that matter for rate limiting.
+
+```python
+from ractogateway.redis import RedisRateLimiter, RateLimitConfig
+
+limiter = RedisRateLimiter(
+    url="redis://localhost:6379/0",
+    config=RateLimitConfig(max_tokens_per_minute=5_000),
+)
+
+# In your request handler — call this before every LLM call:
+user_id = "user_42"
+estimated_tokens = 800   # rough estimate of prompt + expected response
+
+if not limiter.check_and_consume(user_id, tokens=estimated_tokens):
+    raise RuntimeError("Rate limit exceeded — try again in a minute.")
+
+response = kit.chat(gpt.ChatConfig(user_message=user_request))
+
+# Check remaining budget (e.g. to return in response headers):
+remaining = limiter.get_remaining(user_id)
+print(f"Tokens remaining this minute: {remaining}")
+# Tokens remaining this minute: 4200
+```
+
+**`RedisRateLimiter` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | `str` | `"redis://localhost:6379/0"` | Redis connection URL |
+| `client` | `redis.Redis \| None` | `None` | Pre-built Redis client |
+| `config` | `RateLimitConfig \| None` | `None` | Limit config — defaults applied when `None` |
+
+**`RateLimitConfig` fields:**
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_tokens_per_minute` | `int` | `10_000` | Maximum LLM tokens a single user may consume per minute |
+| `key_prefix` | `str` | `"ractogateway:ratelimit"` | Redis key namespace |
+
+**Methods:**
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `check_and_consume(user_id, tokens=1)` | `bool` | `True` = request allowed (tokens consumed). `False` = budget exceeded (no tokens consumed) |
+| `get_remaining(user_id)` | `int` | Remaining token budget for the current minute |
+| `reset(user_id)` | `None` | Delete all rate-limit keys for a user (admin / testing) |
+
+**Key format:** `"{key_prefix}:{user_id}:{unix_minute}"` — keys auto-expire after 60 seconds.
+
+---
+
+### RedisChatMemory — Sliding-Window Conversation History
+
+Stores the last *N* message pairs per conversation in a Redis List. The history is shared across servers, survives rolling deployments, and is instantly accessible to both web servers and background workers.
+
+```python
+from ractogateway.redis import RedisChatMemory, ChatMemoryConfig
+
+memory = RedisChatMemory(
+    url="redis://localhost:6379/0",
+    config=ChatMemoryConfig(
+        max_turns=20,         # keep last 20 turns (40 messages)
+        ttl_seconds=1800,     # conversations expire after 30 min of inactivity
+    ),
+)
+
+conv_id = "conv_session_abc123"
+
+# Append messages as the conversation progresses:
+memory.append(conv_id, "user", "What is the capital of France?")
+memory.append(conv_id, "assistant", "The capital of France is Paris.")
+memory.append(conv_id, "user", "And what is its population?")
+
+# Retrieve history to pass into the kit:
+history = memory.get_history(conv_id)
+# → [
+#     {"role": "user",      "content": "What is the capital of France?"},
+#     {"role": "assistant", "content": "The capital of France is Paris."},
+#     {"role": "user",      "content": "And what is its population?"},
+#   ]
+
+print(memory.count(conv_id))   # 3
+
+# Pass history into a ChatConfig:
+response = kit.chat(gpt.ChatConfig(
+    user_message="Compare it to Tokyo.",
+    history=[gpt.Message(**m) for m in history],
+))
+
+# Clear when session ends:
+memory.clear(conv_id)
+```
+
+**`RedisChatMemory` parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `url` | `str` | `"redis://localhost:6379/0"` | Redis connection URL |
+| `client` | `redis.Redis \| None` | `None` | Pre-built Redis client |
+| `config` | `ChatMemoryConfig \| None` | `None` | Memory config — defaults applied when `None` |
+
+**`ChatMemoryConfig` fields:**
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `max_turns` | `int` | `10` | Max conversation turns to keep. Stores up to `max_turns * 2` messages |
+| `ttl_seconds` | `float \| None` | `None` | TTL refreshed on every `append()`. `None` = no expiry |
+| `key_prefix` | `str` | `"ractogateway:memory"` | Redis key namespace — one List per `conversation_id` |
+
+**Methods:**
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `append(conversation_id, role, content)` | `None` | Add a message and trim to `max_turns * 2`. Refreshes TTL |
+| `get_history(conversation_id)` | `list[dict[str, str]]` | All stored messages as `[{"role": ..., "content": ...}, ...]` |
+| `clear(conversation_id)` | `None` | Delete the conversation from Redis |
+| `count(conversation_id)` | `int` | Number of messages stored |
+
+---
+
+### Production Pattern — Combining Redis Utilities
+
+All three utilities share the same Redis connection URL and complement each other. A typical production setup wires them together at the application level:
+
+```python
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
+from ractogateway.redis import (
+    RedisExactCache,
+    RedisRateLimiter,
+    RedisChatMemory,
+    RateLimitConfig,
+    ChatMemoryConfig,
+)
+
+REDIS_URL = "redis://your-redis-host:6379/0"
+
+# --- Shared infrastructure ---
+cache = RedisExactCache(url=REDIS_URL, ttl_seconds=3600)
+limiter = RedisRateLimiter(
+    url=REDIS_URL,
+    config=RateLimitConfig(max_tokens_per_minute=10_000),
+)
+memory = RedisChatMemory(
+    url=REDIS_URL,
+    config=ChatMemoryConfig(max_turns=20, ttl_seconds=1800),
+)
+
+# --- Kit with distributed cache ---
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer the user's question clearly.",
+    constraints=["Never fabricate facts."],
+    tone="Friendly",
+    output_format="text",
+)
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt, exact_cache=cache)
+
+
+# --- Request handler (e.g. FastAPI endpoint) ---
+def handle_request(user_id: str, conv_id: str, user_message: str) -> str:
+    # 1. Enforce rate limit before touching the LLM
+    if not limiter.check_and_consume(user_id, tokens=500):
+        raise RuntimeError(f"Rate limit exceeded. Remaining: {limiter.get_remaining(user_id)}")
+
+    # 2. Load conversation history from Redis
+    history = memory.get_history(conv_id)
+
+    # 3. Call the kit (distributed cache checked automatically)
+    response = kit.chat(gpt.ChatConfig(
+        user_message=user_message,
+        history=[gpt.Message(**m) for m in history],
+    ))
+
+    # 4. Persist the new turn back to Redis
+    memory.append(conv_id, "user", user_message)
+    memory.append(conv_id, "assistant", response.content or "")
+
+    return response.content or ""
+```
+
+**What happens on every request:**
+
+| Step | Action | Cost if cached |
+| --- | --- | --- |
+| Rate limit check | `INCRBY + EXPIRE` in Redis pipeline | < 1 ms |
+| History load | `LRANGE` on Redis List | < 1 ms |
+| Exact cache lookup | `GET` in Redis | < 1 ms — API call skipped entirely |
+| LLM API call | Only if cache miss | Full cost + latency |
+| History save | `RPUSH + LTRIM + EXPIRE` pipeline | < 1 ms |
+
+---
+
+## Celery Task Queue
+
+`RactoCeleryWorker` is the background-task layer for long-running and retry-prone workflows.
+It supports:
+
+- Never-fail LLM generation with exponential-backoff retries.
+- Background RAG ingestion (`read -> chunk -> embed -> store`) on worker nodes.
+- Parallel fan-out inference with Celery `group()`.
+
+Install:
+
+```bash
+pip install ractogateway[celery]
+```
+
+### Never-Fail LLM Generation
+
+```python
+# tasks.py (must be importable by BOTH app process and Celery workers)
+from celery import Celery
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
+from ractogateway.celery import RactoCeleryWorker, RetryConfig
+
+prompt = RactoPrompt(
+    role="You are a concise assistant.",
+    aim="Answer clearly.",
+    constraints=["Never fabricate facts."],
+    tone="Professional",
+    output_format="text",
+)
+
+celery_app = Celery(
+    "ractogateway",
+    broker="redis://localhost:6379/0",
+    backend="redis://localhost:6379/0",
+)
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt)
+
+worker = RactoCeleryWorker(
+    celery_app,
+    kit=kit,
+    retry_config=RetryConfig(max_retries=3, initial_delay_s=2.0),
+)
+
+handle = worker.generate("Summarize this meeting transcript.")
+result = worker.wait(handle.id, timeout_s=60.0)
+
+print(result.status)
+print(result.ok)
+print(result.result["content"] if result.result else result.error)
+```
+
+#### Input
+
+```text
+Summarize this meeting transcript.
+```
+
+#### Output (Example)
+
+```text
+TaskStatus.SUCCESS
+True
+The meeting reviewed Q1 metrics and finalized two hiring decisions...
+```
+
+### Background Document Ingestion
+
+```python
+from celery import Celery
+from ractogateway import openai_developer_kit as gpt, RactoRAG
+from ractogateway.celery import RactoCeleryWorker
+from ractogateway.rag.embedders import OpenAIEmbedder
+from ractogateway.rag.stores import ChromaStore
+
+celery_app = Celery(
+    "ractogateway",
+    broker="redis://localhost:6379/0",
+    backend="redis://localhost:6379/0",
+)
+
+kit = gpt.Chat(model="gpt-4o")
+rag = RactoRAG(
+    vector_store=ChromaStore(collection="docs", persist_directory="./db"),
+    embedder=OpenAIEmbedder(model="text-embedding-3-large"),
+    llm_kit=kit,
+)
+
+worker = RactoCeleryWorker(celery_app, kit=kit, rag=rag)
+
+job = worker.ingest_document("./docs/policy.pdf", source="policy_v1")
+status = worker.wait(job.id, timeout_s=180.0)
+
+print(status.status)
+print(len(status.result) if status.result else status.error)
+```
+
+#### Output (Example)
+
+```text
+TaskStatus.SUCCESS
+42
+```
+
+### Parallel Batch Inference
+
+```python
+from celery import Celery
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.batch import BatchItem
+from ractogateway.celery import RactoCeleryWorker
+
+celery_app = Celery(
+    "ractogateway",
+    broker="redis://localhost:6379/0",
+    backend="redis://localhost:6379/0",
+)
+kit = gpt.Chat(model="gpt-4o-mini")
+worker = RactoCeleryWorker(celery_app, kit=kit)
+
+group_result = worker.parallel_batch(
+    [
+        BatchItem(custom_id="q1", user_message="What is Python?"),
+        BatchItem(custom_id="q2", user_message="What is Redis?"),
+    ]
+)
+
+results = worker.wait_parallel(group_result, timeout_s=120.0)
+for r in results:
+    print(r.task_id, r.status, r.ok)
+```
+
+#### Output (Example)
+
+```text
+e4c7... TaskStatus.SUCCESS True
+7ad3... TaskStatus.SUCCESS True
+```
+
+### RetryConfig — Exponential Backoff Policy
+
+`RetryConfig` controls transient-failure retries in Celery tasks.
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `max_retries` | `int` | `3` | Retry attempts after first failure |
+| `initial_delay_s` | `float` | `2.0` | Delay before first retry |
+| `backoff_factor` | `float` | `2.0` | Delay multiplier per retry |
+| `max_delay_s` | `float` | `300.0` | Upper bound for retry delay |
+
+Delay formula used by worker tasks:
+
+```text
+delay = min(initial_delay_s * backoff_factor**attempt, max_delay_s)
+```
+
+With defaults: `2s -> 4s -> 8s` (then retries are exhausted).
+
+### Worker Startup
+
+Because Celery workers run in separate processes, the module that instantiates
+`RactoCeleryWorker` must be imported by the worker process.
+
+```bash
+celery -A tasks.celery_app worker --loglevel=info
+```
 
 ---
 
