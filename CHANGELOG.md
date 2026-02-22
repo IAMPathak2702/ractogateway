@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.3] — 2026-02-22
+
+### Added
+
+- **OpenAI Structured Outputs support** (`ractogateway.adapters._openai_schema`):
+  - `sanitize_for_openai(schema)` — recursively strips all keywords rejected by the
+    OpenAI `json_schema` response format (`default`, `title`, `minimum`, `maximum`,
+    `minLength`, `maxLength`, `pattern`, `format`, `minItems`, `maxItems`, etc.) and
+    enforces strict-mode invariants (`additionalProperties: false`, all properties
+    listed in `required`) throughout the schema tree including `$defs`.
+  - `validate_schema_for_openai(schema, model_name)` — early sanity check that raises
+    a descriptive `ValueError` for constructs that cannot be auto-fixed (`not`,
+    `if/then/else`, `allOf`, unsupported primitive types) *before* any API call is made.
+  - `build_response_format(model)` — validates, sanitises, and returns the
+    `{"type": "json_schema", "json_schema": {"name": ..., "schema": ..., "strict": True}}`
+    dict ready to pass as `response_format` to OpenAI Chat Completions.
+- **41 unit tests** in `tests/test_openai_schema.py` covering keyword stripping,
+  strict-mode enforcement, `Optional` field handling, nested models, early validation
+  errors, and `build_response_format` output.
+
+### Changed
+
+- `OpenAILLMKit._build_request` now automatically sets `response_format` via
+  `build_response_format` whenever `prompt.output_format` is a Pydantic `BaseModel`
+  subclass. Users can override by passing `response_format=...` in `kwargs`.
+- `_schema_from_model` in `ractogateway.prompts.engine` now strips the same
+  Pydantic-generated noise keywords from prompt-embedded schemas (previously only
+  `title` was removed).
+- Version bumped from `0.1.2` to `0.1.3` in `pyproject.toml`, `__init__.py`, and
+  `docs/conf.py` (docs was incorrectly pinned to `0.1.1`).
+
+---
+
 ## [0.1.1] — 2026-02-19
 
 ### Added

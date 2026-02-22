@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 project = "RactoGateway"
 author = "Ved Prakash Pathak"
 copyright = "2026, Ved Prakash Pathak"  # noqa: A001
-version = "0.1.1"
-release = "0.1.1"
+version = "0.1.3"
+release = "0.1.3"
 
 # -- General configuration -----------------------------------------------------
 extensions = [
@@ -29,17 +29,21 @@ extensions = [
 # MyST options
 myst_enable_extensions = ["colon_fence", "deflist"]
 
-# Mock all optional dependencies so autodoc doesn't fail when they aren't installed
+# Mock all optional dependencies so autodoc doesn't fail when they aren't installed.
+# Keep this list in sync with [project.optional-dependencies] in pyproject.toml.
 autodoc_mock_imports = [
+    # LLM providers
     "openai",
     "anthropic",
     "google",
     "google.genai",
+    # RAG — file readers
     "pypdf",
     "docx",
     "openpyxl",
     "PIL",
     "nltk",
+    # RAG — vector stores
     "chromadb",
     "faiss",
     "pinecone",
@@ -48,8 +52,22 @@ autodoc_mock_imports = [
     "pymilvus",
     "psycopg2",
     "pgvector",
+    # RAG — embeddings
     "voyageai",
     "numpy",
+    # Performance / cache
+    "tiktoken",
+    # Redis infrastructure
+    "redis",
+    # Celery task queue
+    "celery",
+    "kombu",
+    # Kafka event streaming
+    "kafka",
+    # MCP (Model Context Protocol)
+    "mcp",
+    "starlette",
+    "uvicorn",
 ]
 
 # autodoc options

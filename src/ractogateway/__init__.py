@@ -320,7 +320,7 @@ __all__ = [
     "truncation",
 ]
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 
 def __getattr__(name: str) -> Any:

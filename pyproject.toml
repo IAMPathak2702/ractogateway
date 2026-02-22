@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ractogateway"
-version = "0.1.2"
+version = "0.1.3"
 description = "A unified, production-ready AI SDK that enforces structured outputs and anti-hallucination prompting via the RACTO principle. One package for OpenAI, Gemini, and Anthropic — with streaming, tool calling, embeddings, and strict Pydantic validation."
 readme = "README.md"
 license = "Apache-2.0"
