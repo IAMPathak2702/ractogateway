@@ -16,7 +16,7 @@ import json
 import mimetypes
 import textwrap
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Union, cast
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -34,7 +34,9 @@ class _Unset:
 # ---------------------------------------------------------------------------
 
 #: MIME types treated as images by every provider.
-_IMAGE_MIMES: frozenset[str] = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+_IMAGE_MIMES: frozenset[str] = frozenset(
+    {"image/jpeg", "image/png", "image/gif", "image/webp"}
+)
 
 
 class RactoFile:
@@ -212,13 +214,17 @@ def _build_anthropic_content(
                 }
             )
         elif f.is_text:
-            parts.append({"type": "text", "text": f.data.decode("utf-8", errors="replace")})
+            parts.append(
+                {"type": "text", "text": f.data.decode("utf-8", errors="replace")}
+            )
         else:
             label = f.name or "attachment"
             parts.append(
                 {
                     "type": "text",
-                    "text": (f"[File: {label} ({f.mime_type}) — base64 encoded]\n{f.base64_data}"),
+                    "text": (
+                        f"[File: {label} ({f.mime_type}) — base64 encoded]\n{f.base64_data}"
+                    ),
                 }
             )
     parts.append({"type": "text", "text": user_message})
@@ -260,13 +266,49 @@ def _build_google_content(
 
 
 def _schema_from_model(model: type[BaseModel]) -> dict[str, Any]:
-    """Extract a clean JSON Schema dict from a Pydantic v2 model."""
-    schema = model.model_json_schema()
-    # Remove pydantic-internal metadata that clutters the prompt.
-    schema.pop("title", None)
-    for prop in schema.get("properties", {}).values():
-        prop.pop("title", None)
-    return schema
+    """Extract a clean JSON Schema dict from a Pydantic v2 model.
+
+    Strips pydantic-internal and OpenAI-incompatible keywords so that the
+    embedded schema in the RACTO prompt is compact and unambiguous for the LLM.
+    Keywords removed: ``title``, ``$schema``, ``default``, numeric constraints
+    (``minimum``/``maximum``/``exclusiveMinimum``/``exclusiveMaximum``/
+    ``multipleOf``), string constraints (``minLength``/``maxLength``/
+    ``pattern``/``format``), array constraints (``minItems``/``maxItems``/
+    ``uniqueItems``), and content-encoding hints.
+    """
+    _prompt_strip: frozenset[str] = frozenset(
+        {
+            "title",
+            "$schema",
+            "default",
+            "minimum",
+            "maximum",
+            "exclusiveMinimum",
+            "exclusiveMaximum",
+            "multipleOf",
+            "minLength",
+            "maxLength",
+            "pattern",
+            "format",
+            "minItems",
+            "maxItems",
+            "uniqueItems",
+            "contentEncoding",
+            "contentMediaType",
+        }
+    )
+
+    def _strip(node: Any) -> Any:
+        if isinstance(node, list):
+            return [_strip(item) for item in node]
+        if isinstance(node, dict):
+            return {k: _strip(v) for k, v in node.items() if k not in _prompt_strip}
+        return node
+
+    result = _strip(model.model_json_schema())
+    if not isinstance(result, dict):
+        raise TypeError("model_json_schema() must return a JSON object at the root")
+    return cast("dict[str, Any]", result)
 
 
 def _render_output_block(output_format: str | type[BaseModel]) -> str:
@@ -453,12 +495,14 @@ class RactoPrompt(BaseModel):
         # --- ANTI-HALLUCINATION FOOTER ---
         if self.anti_hallucination:
             sections.append(
-                textwrap.dedent("""\
+                textwrap.dedent(
+                    """\
                     [GUARDRAILS]
                     - If you are unsure or lack sufficient information, state it explicitly rather than guessing.
                     - Do NOT fabricate facts, citations, URLs, statistics, or code that you cannot verify.
                     - Stick strictly to what is asked. Do not add unrequested information.
-                    - If the answer requires assumptions, list each assumption explicitly before proceeding.""")
+                    - If the answer requires assumptions, list each assumption explicitly before proceeding."""
+                )
             )
 
         return "\n\n".join(sections) + "\n"
@@ -520,7 +564,10 @@ class RactoPrompt(BaseModel):
             # will unpack it.
             return [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": _build_anthropic_content(user_message, files)},
+                {
+                    "role": "user",
+                    "content": _build_anthropic_content(user_message, files),
+                },
             ]
 
         if provider == "google":

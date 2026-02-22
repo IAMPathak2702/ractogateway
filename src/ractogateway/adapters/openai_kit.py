@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from pydantic import BaseModel
+
+from ractogateway.adapters._openai_schema import build_response_format
 from ractogateway.adapters.base import (
     BaseLLMAdapter,
     FinishReason,
@@ -226,5 +229,18 @@ class OpenAILLMKit(BaseLLMAdapter):
         }
         if tools and len(tools) > 0:
             request["tools"] = self.translate_tools(tools)
+
+        # Use OpenAI Structured Outputs when the output_format is a Pydantic model.
+        # build_response_format validates and sanitises the schema *before* the API
+        # call so that incompatible Pydantic keywords (default, minimum, anyOf issues
+        # etc.) raise a clear ValueError here rather than an opaque API rejection.
+        # Users can override by passing ``response_format=...`` in kwargs.
+        if (
+            "response_format" not in kwargs
+            and isinstance(prompt.output_format, type)
+            and issubclass(prompt.output_format, BaseModel)
+        ):
+            request["response_format"] = build_response_format(prompt.output_format)
+
         request.update(kwargs)
         return request

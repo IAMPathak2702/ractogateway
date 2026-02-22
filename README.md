@@ -2705,13 +2705,13 @@ server = RactoMCPServer.from_registry(registry, name="math-tools")
 server.run(transport="stdio")  # blocks; for subprocess MCP clients
 ```
 
-#### Input
+#### Input (Server Tool Call)
 
 ```json
 {"tool": "add", "arguments": {"a": 7, "b": 5}}
 ```
 
-#### Output
+#### Output (Server Tool Result)
 
 ```text
 12
@@ -2735,7 +2735,7 @@ print(result.content)
 print(result.is_error)
 ```
 
-#### Output
+#### Output (Sync Client Call)
 
 ```text
 42
@@ -2772,13 +2772,13 @@ response = kit.chat(
 print(response.content)
 ```
 
-#### Input
+#### Input (Tool-Converted Registry)
 
 ```text
 What is weather in Tokyo?
 ```
 
-#### Output (Example)
+#### Output (Registry Chat Example)
 
 ```text
 Tokyo weather is 26C and clear skies.
@@ -2807,7 +2807,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-#### Output (Example)
+#### Output (Merged Servers Example)
 
 ```text
 ['add', 'search_docs', 'weather']
@@ -2834,13 +2834,13 @@ response = agent.run(gpt.ChatConfig(user_message="What is 45 + 55?"))
 print(response.content)
 ```
 
-#### Input
+#### Input (MCPAgent Prompt)
 
 ```text
 What is 45 + 55?
 ```
 
-#### Output (Example)
+#### Output (MCPAgent Example)
 
 ```text
 45 + 55 = 100.
@@ -3191,13 +3191,13 @@ print(result.ok)
 print(result.result["content"] if result.result else result.error)
 ```
 
-#### Input
+#### Input (Generation Task)
 
 ```text
 Summarize this meeting transcript.
 ```
 
-#### Output (Example)
+#### Output (Generation Example)
 
 ```text
 TaskStatus.SUCCESS
@@ -3236,7 +3236,7 @@ print(status.status)
 print(len(status.result) if status.result else status.error)
 ```
 
-#### Output (Example)
+#### Output (Ingestion Example)
 
 ```text
 TaskStatus.SUCCESS
@@ -3271,7 +3271,7 @@ for r in results:
     print(r.task_id, r.status, r.ok)
 ```
 
-#### Output (Example)
+#### Output (Parallel Batch Example)
 
 ```text
 e4c7... TaskStatus.SUCCESS True
