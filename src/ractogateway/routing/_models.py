@@ -22,7 +22,9 @@ class RoutingTier(BaseModel):
         model.  Range: 0-100.  Set to ``100`` for the last (most powerful)
         tier so it catches everything.
 
-    Example ladder (3-tier OpenAI)::
+    Examples
+    --------
+    ::
 
         tiers = [
             RoutingTier(model="gpt-4o-mini",  max_score=30),

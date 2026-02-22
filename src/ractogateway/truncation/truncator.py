@@ -32,7 +32,9 @@ class TokenTruncator:
         :class:`~ractogateway.truncation.TruncationConfig` instance.  If
         omitted a default config is used (approximate counter, 8 k limit).
 
-    Example::
+    Examples
+    --------
+    ::
 
         from ractogateway.truncation import TokenTruncator, TruncationConfig
         import tiktoken

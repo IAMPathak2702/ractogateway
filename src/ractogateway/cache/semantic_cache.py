@@ -68,7 +68,9 @@ class SemanticCache:
     ttl_seconds:
         Optional per-entry TTL.  ``None`` disables expiry.
 
-    Example::
+    Examples
+    --------
+    ::
 
         import ractogateway.openai_developer_kit as gpt
 

@@ -26,6 +26,14 @@ guide/tools
 guide/embeddings
 guide/finetune
 guide/rag
+guide/batch
+guide/cache
+guide/routing
+guide/truncation
+guide/mcp
+guide/redis
+guide/celery
+guide/kafka
 ```
 
 ```{toctree}
