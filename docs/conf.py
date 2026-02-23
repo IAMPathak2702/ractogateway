@@ -38,6 +38,7 @@ extensions = [
 
 # MyST options
 myst_enable_extensions = ["colon_fence", "deflist"]
+myst_heading_anchors = 3  # auto-generate anchors for h1-h3 headings
 
 # Mock all optional dependencies so autodoc doesn't fail when they aren't installed.
 # Keep this list in sync with [project.optional-dependencies] in pyproject.toml.

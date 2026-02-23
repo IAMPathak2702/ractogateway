@@ -19,6 +19,7 @@ quickstart
 :maxdepth: 2
 :caption: User Guide
 
+guide/userguide
 guide/prompt_engine
 guide/developer_kits
 guide/streaming
