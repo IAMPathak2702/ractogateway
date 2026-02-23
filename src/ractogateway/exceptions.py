@@ -45,6 +45,50 @@ class RactoGatewayAuthError(RactoGatewayError):
     """API key missing, invalid, or not authorised for the requested resource."""
 
 
+class ResponseModelValidationError(RactoGatewayError):
+    """Raised when ``response_model`` validation cannot be satisfied.
+
+    The LLM returned structurally valid JSON but Pydantic rejected it (e.g.
+    a field value was out of range) and all automatic retry attempts were
+    exhausted.
+
+    Attributes
+    ----------
+    attempts:
+        Total number of API calls made (1 initial + N retries).
+    last_error:
+        The final :class:`pydantic.ValidationError` that triggered this
+        exception.
+    raw_response:
+        The LLM's raw text from the last attempt, available for inspection
+        or manual recovery.
+
+    Example::
+
+        from ractogateway.exceptions import ResponseModelValidationError
+
+        try:
+            response = kit.chat(config)
+        except ResponseModelValidationError as e:
+            print(e.last_error)       # Pydantic ValidationError details
+            print(e.raw_response)     # raw JSON string from the LLM
+            print(e.attempts)         # how many times we tried
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        attempts: int,
+        last_error: Exception,
+        raw_response: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+        self.last_error = last_error
+        self.raw_response = raw_response
+
+
 # ---------------------------------------------------------------------------
 # Internal helper — not part of the public API surface but importable.
 # ---------------------------------------------------------------------------

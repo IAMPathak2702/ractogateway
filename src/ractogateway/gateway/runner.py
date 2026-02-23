@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ractogateway.adapters.base import BaseLLMAdapter, LLMResponse
+from ractogateway.exceptions import ResponseModelValidationError
 from ractogateway.prompts.engine import RactoPrompt
 from ractogateway.tools.registry import ToolRegistry
 
@@ -153,20 +154,21 @@ class Gateway:
     ) -> LLMResponse:
         """Validate and re-parse the response through a Pydantic model.
 
-        If validation succeeds, ``response.parsed`` is replaced with the
-        validated model's ``.model_dump()``.  If it fails, the original
-        ``parsed`` dict is left untouched and the validation error is
-        stored in ``response.content`` as a warning.
+        On success, ``response.parsed`` is replaced with the validated
+        model's ``.model_dump()``.  On failure a
+        :class:`~ractogateway.exceptions.ResponseModelValidationError` is
+        raised (the Gateway does not retry — callers control retry logic).
         """
+        if not isinstance(response.parsed, dict):
+            return response
         try:
-            if isinstance(response.parsed, dict):
-                validated = model.model_validate(response.parsed)
-                response.parsed = validated.model_dump()
-        except Exception as exc:
-            # Don't crash — surface the validation issue but keep raw data.
-            warning = f"[RactoGateway] response_model validation failed: {exc}"
-            if response.content:
-                response.content = f"{response.content}\n\n{warning}"
-            else:
-                response.content = warning
+            validated = model.model_validate(response.parsed)
+            response.parsed = validated.model_dump()
+        except ValidationError as exc:
+            raise ResponseModelValidationError(
+                f"response_model validation failed. Last error: {exc}",
+                attempts=1,
+                last_error=exc,
+                raw_response=response.content,
+            ) from exc
         return response

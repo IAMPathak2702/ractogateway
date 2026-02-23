@@ -15,6 +15,8 @@
 7. [Your First Chat](#7-your-first-chat)
 8. [ChatConfig — Controlling Every Request](#8-chatconfig)
 9. [Getting Structured / Typed Output](#9-structured-output)
+    - 9.1 Complex Nested Structured Output
+    - 9.2 Validation Retries and `ResponseModelValidationError`
 10. [Multi-Turn Conversations (History)](#10-multi-turn-conversations)
 11. [Streaming — Real-Time Token-by-Token Output](#11-streaming)
 12. [Tool Calling — LLM Calls Your Python Functions](#12-tool-calling)
@@ -506,6 +508,262 @@ print(type(report))          # <class '__main__.WeatherReport'>
 ```
 
 > **Why two places?** `output_format` in `RactoPrompt` tells the LLM what to generate (embeds the JSON Schema in the system prompt). `response_model` in `ChatConfig` validates the output in Python. Use both together for end-to-end type safety.
+
+---
+
+### 9.1 Complex Nested Structured Output — Enterprise Vendor Evaluation
+
+Real-world schemas are deeply nested with enums, constrained integers,
+and lists of sub-models. This example shows a board-level vendor risk
+evaluation with six sub-models.
+
+> **Key Rule — always make score ranges explicit in your constraints.**
+> Pydantic enforces bounds silently (a validation error, not an API
+> error), so the LLM has no way to know the range unless you state it
+> in the prompt. Use `conint(ge=1, le=100)` for percentage-like scores
+> and tell the model `"all scores are integers on a 1–100 scale"` in
+> the constraints list.
+
+```python
+from typing import List, Literal
+from pydantic import BaseModel, conint, confloat
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.prompts.engine import RactoPrompt
+
+
+# ── Sub-models ─────────────────────────────────────────────────────────────
+
+class FinancialRisk(BaseModel):
+    burn_rate_risk: Literal["low", "medium", "high"]
+    runway_months: conint(ge=0, le=60)
+    profitability_projection_years: conint(ge=0, le=10)
+    financial_score: conint(ge=1, le=100)          # 1–100, higher = healthier finances
+
+
+class SecurityAssessment(BaseModel):
+    data_encryption: Literal["none", "at_rest_only", "at_rest_and_in_transit"]
+    iso_certified: bool
+    soc2_certified: bool
+    gdpr_compliant: bool
+    vulnerabilities_found: conint(ge=0, le=100)
+    security_score: conint(ge=1, le=100)           # 1–100, higher = more secure
+
+
+class TechnicalArchitecture(BaseModel):
+    architecture_style: Literal["monolith", "microservices", "serverless", "hybrid"]
+    cloud_provider: Literal["aws", "gcp", "azure", "multi-cloud", "on-prem"]
+    scalability_rating: conint(ge=1, le=100)       # 1–100, higher = more scalable
+    reliability_sla: confloat(ge=0.0, le=100.0)
+    vendor_lock_in_risk: Literal["low", "medium", "high"]
+
+
+class RiskMatrix(BaseModel):
+    category: Literal["financial", "security", "technical", "operational"]
+    probability: Literal["low", "medium", "high"]
+    impact: Literal["low", "medium", "high"]
+    mitigation_strategy: str
+
+
+class MigrationPhase(BaseModel):
+    phase_name: str
+    duration_months: conint(ge=1, le=36)
+    complexity_score: conint(ge=1, le=10)          # 1–10 scale (task complexity)
+    key_deliverables: List[str]
+
+
+class FinalRecommendation(BaseModel):
+    decision: Literal["approve", "approve_with_conditions", "reject"]
+    confidence_score: conint(ge=1, le=100)
+    key_strengths: List[str]
+    critical_weaknesses: List[str]
+    board_summary: str
+
+
+class VendorEvaluation(BaseModel):
+    vendor_name: str
+    industry: str
+    annual_contract_value_usd: conint(ge=10_000, le=10_000_000)
+
+    financial_risk: FinancialRisk
+    security_assessment: SecurityAssessment
+    technical_architecture: TechnicalArchitecture
+
+    top_risks: List[RiskMatrix]
+    migration_plan: List[MigrationPhase]
+
+    overall_risk_score: conint(ge=1, le=100)       # 1–100, higher = riskier
+
+    final_recommendation: FinalRecommendation
+
+
+# ── User input ─────────────────────────────────────────────────────────────
+
+vendor_brief = """
+We are evaluating NeuroStack AI as a strategic enterprise AI vendor.
+
+Company Profile:
+- 3 years old, monthly burn rate: $1.2M, raised $25M Series A
+- Not profitable; expected profitability in 4–5 years
+
+Security:
+- ISO 27001 certified, no SOC 2, encryption at rest and in transit
+- 3 minor vulnerabilities last year, GDPR compliant
+
+Technical:
+- Hybrid architecture hosted on AWS, SLA 99.2%
+- Heavy proprietary API usage; deep workflow integration required
+
+Financials:
+- Annual contract: $2.4M, operational dependency: Critical
+- Moderate probability of vendor collapse in next 18 months
+"""
+
+# ── Prompt ─────────────────────────────────────────────────────────────────
+
+kit = gpt.OpenAIDeveloperKit(model="gpt-4o")
+
+config = gpt.ChatConfig(
+    user_message=vendor_brief,
+    prompt=RactoPrompt(
+        role="You are a Chief Risk Officer conducting a board-level enterprise vendor risk evaluation.",
+        aim="Produce a structured, multi-dimensional vendor evaluation strictly matching the schema.",
+        constraints=[
+            # ✅ Always state numeric ranges explicitly — do not rely on the model
+            #    guessing Pydantic bounds from the schema description alone.
+            "financial_score, security_score, scalability_rating, overall_risk_score, and confidence_score are all integers on a 1–100 scale.",
+            "complexity_score inside each MigrationPhase is an integer on a 1–10 scale.",
+            "runway_months must be derived from (cash raised ÷ monthly burn) realistically.",
+            "overall_risk_score must reflect the sub-scores logically.",
+            "decision must align with overall_risk_score: ≤35 approve, 36–65 approve_with_conditions, >65 reject.",
+            "Provide at least 3 top_risks entries.",
+            "Provide exactly 3 migration phases.",
+        ],
+        tone="Executive, analytical, objective.",
+        output_format=VendorEvaluation,
+    ),
+    temperature=0.0,
+    max_tokens=2000,
+    response_model=VendorEvaluation,
+)
+
+# ── Execute ────────────────────────────────────────────────────────────────
+
+from ractogateway.exceptions import ResponseModelValidationError
+
+try:
+    response = kit.chat(config)
+    print("======== PARSED STRUCTURED OUTPUT ========")
+    print(response.parsed)
+    print("\n======== RAW JSON OUTPUT ========")
+    print(response.content)
+except ResponseModelValidationError as e:
+    print(f"Validation failed after {e.attempts} attempt(s)")
+    print(f"Last error: {e.last_error}")
+    print(f"Raw output: {e.raw_response}")
+```
+
+**Expected output (values will vary slightly with the model):**
+
+```json
+======== PARSED STRUCTURED OUTPUT ========
+{
+  'vendor_name': 'NeuroStack AI',
+  'industry': 'Artificial Intelligence',
+  'annual_contract_value_usd': 2400000,
+  'financial_risk': {
+    'burn_rate_risk': 'high', 'runway_months': 20,
+    'profitability_projection_years': 4, 'financial_score': 40
+  },
+  'security_assessment': {
+    'data_encryption': 'at_rest_and_in_transit',
+    'iso_certified': True, 'soc2_certified': False, 'gdpr_compliant': True,
+    'vulnerabilities_found': 3, 'security_score': 70
+  },
+  'technical_architecture': {
+    'architecture_style': 'hybrid', 'cloud_provider': 'aws',
+    'scalability_rating': 75, 'reliability_sla': 99.2, 'vendor_lock_in_risk': 'high'
+  },
+  ...
+  'overall_risk_score': 55,
+  'final_recommendation': {
+    'decision': 'approve_with_conditions', 'confidence_score': 65, ...
+  }
+}
+```
+
+---
+
+### 9.2 Validation Retries and `ResponseModelValidationError`
+
+When `response_model` is set, RactoGateway automatically retries the API call
+with a targeted correction prompt if Pydantic rejects the output. This is
+controlled by `max_validation_retries` in `ChatConfig` (default: **2**).
+
+**Retry flow:**
+
+1. Initial API call → Pydantic validation attempt.
+2. On failure → the exact field errors and the bad JSON are fed back to the LLM.
+3. The LLM is asked to return a corrected JSON (keeping all valid fields).
+4. Steps 2–3 repeat up to `max_validation_retries` times.
+5. If all attempts fail → `ResponseModelValidationError` is raised.
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.prompts.engine import RactoPrompt
+from ractogateway.exceptions import ResponseModelValidationError
+from pydantic import BaseModel, conint
+
+class Score(BaseModel):
+    label: str
+    value: conint(ge=1, le=10)   # strict 1–10
+
+kit = gpt.OpenAIDeveloperKit(model="gpt-4o-mini")
+
+config = gpt.ChatConfig(
+    user_message="Rate 'Python' as a programming language.",
+    prompt=RactoPrompt(
+        role="You are a language evaluator.",
+        aim="Return a score for the given language.",
+        constraints=["value must be an integer from 1 to 10."],
+        tone="Concise.",
+        output_format=Score,
+    ),
+    response_model=Score,
+    max_validation_retries=2,   # default — retry up to 2 times on bad output
+)
+
+try:
+    response = kit.chat(config)
+    print(response.parsed)   # {'label': 'Python', 'value': 9}
+except ResponseModelValidationError as e:
+    # All retries exhausted — inspect what went wrong
+    print(f"Failed after {e.attempts} attempt(s)")
+    print(f"Last Pydantic error: {e.last_error}")
+    print(f"Raw LLM output:      {e.raw_response}")
+```
+
+**`ResponseModelValidationError` attributes:**
+
+| Attribute | Type | Meaning |
+|---|---|---|
+| `attempts` | `int` | Total API calls made (1 initial + N retries) |
+| `last_error` | `pydantic.ValidationError` | The final Pydantic error |
+| `raw_response` | `str \| None` | Raw text from the last LLM attempt |
+
+**`max_validation_retries` in `ChatConfig`:**
+
+| Value | Behaviour |
+|---|---|
+| `0` | No retries — raise immediately on first validation failure |
+| `1` | One retry after the initial call |
+| `2` | Two retries (default) |
+| `3–5` | More retries for complex schemas (max allowed: 5) |
+
+> **Streaming note:** `stream()` and `astream()` cannot retry because content
+> is already delivered token-by-token. If validation fails on the final chunk,
+> `ResponseModelValidationError` is raised directly. Wrap your stream loop in
+> `try/except ResponseModelValidationError` if you use `response_model` with
+> streaming.
 
 ---
 
@@ -1375,6 +1633,33 @@ kit.chat(...)   # ❌  ImportError: The 'openai' package is required
 # FIX
 # pip install "ractogateway[openai]"
 ```
+
+### Mistake 8: Not handling `ResponseModelValidationError`
+
+When `response_model` is set, validation failures now raise
+`ResponseModelValidationError` after all retries are exhausted — they no
+longer silently append a warning string to `response.content`.
+
+```python
+# WRONG — this will now raise, not return a response with garbled content
+response = kit.chat(config)   # ❌ unhandled ResponseModelValidationError
+
+# CORRECT — wrap in try/except to handle gracefully
+from ractogateway.exceptions import ResponseModelValidationError
+
+try:
+    response = kit.chat(config)
+    report = MyModel(**response.parsed)
+except ResponseModelValidationError as e:
+    # Inspect what happened and decide how to recover
+    print(f"Validation failed after {e.attempts} attempt(s): {e.last_error}")
+    # e.raw_response holds the last raw JSON string from the LLM
+```
+
+> **Tip:** The default `max_validation_retries=2` means the kit will
+> automatically retry twice before raising — most transient issues resolve
+> in the first retry. Set `max_validation_retries=0` to disable retries and
+> fail fast.
 
 ---
 

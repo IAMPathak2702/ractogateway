@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         RactoGatewayAuthError,
         RactoGatewayError,
         RactoGatewayTimeoutError,
+        ResponseModelValidationError,
     )
     from ractogateway.finetune import (
         AnthropicFineTuner,
@@ -120,6 +121,10 @@ _ATTR_EXPORTS: dict[str, tuple[str, str]] = {
     "RactoGatewayTimeoutError": ("ractogateway.exceptions", "RactoGatewayTimeoutError"),
     "RactoGatewayAPIError": ("ractogateway.exceptions", "RactoGatewayAPIError"),
     "RactoGatewayAuthError": ("ractogateway.exceptions", "RactoGatewayAuthError"),
+    "ResponseModelValidationError": (
+        "ractogateway.exceptions",
+        "ResponseModelValidationError",
+    ),
     # Fine-tuning
     "AnthropicFineTuner": ("ractogateway.finetune", "AnthropicFineTuner"),
     "GeminiFineTuner": ("ractogateway.finetune", "GeminiFineTuner"),
@@ -228,6 +233,7 @@ __all__ = [
     "RactoGatewayTimeoutError",
     "RactoGatewayAPIError",
     "RactoGatewayAuthError",
+    "ResponseModelValidationError",
     # Fine-tuning
     "AnthropicFineTuner",
     "GeminiFineTuner",

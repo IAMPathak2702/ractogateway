@@ -268,31 +268,23 @@ def _build_google_content(
 def _schema_from_model(model: type[BaseModel]) -> dict[str, Any]:
     """Extract a clean JSON Schema dict from a Pydantic v2 model.
 
-    Strips pydantic-internal and OpenAI-incompatible keywords so that the
-    embedded schema in the RACTO prompt is compact and unambiguous for the LLM.
-    Keywords removed: ``title``, ``$schema``, ``default``, numeric constraints
-    (``minimum``/``maximum``/``exclusiveMinimum``/``exclusiveMaximum``/
-    ``multipleOf``), string constraints (``minLength``/``maxLength``/
-    ``pattern``/``format``), array constraints (``minItems``/``maxItems``/
-    ``uniqueItems``), and content-encoding hints.
+    Strips only pydantic-internal bookkeeping keywords that carry no semantic
+    meaning for the LLM (``title``, ``$schema``, ``default``,
+    ``contentEncoding``, ``contentMediaType``).
+
+    Constraint keywords such as ``minimum``/``maximum``/``minLength``/
+    ``maxLength``/``pattern``/``minItems``/``maxItems``/``uniqueItems``/
+    ``multipleOf``/``exclusiveMinimum``/``exclusiveMaximum`` are intentionally
+    **kept** so the LLM can see the exact numeric and string bounds it must
+    respect.  The separate :func:`~ractogateway.adapters._openai_schema.sanitize_for_openai`
+    function strips those keywords for the OpenAI API wire format — a distinct
+    concern.
     """
     _prompt_strip: frozenset[str] = frozenset(
         {
             "title",
             "$schema",
             "default",
-            "minimum",
-            "maximum",
-            "exclusiveMinimum",
-            "exclusiveMaximum",
-            "multipleOf",
-            "minLength",
-            "maxLength",
-            "pattern",
-            "format",
-            "minItems",
-            "maxItems",
-            "uniqueItems",
             "contentEncoding",
             "contentMediaType",
         }

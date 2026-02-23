@@ -75,6 +75,18 @@ class ChatConfig(BaseModel):
             "the output is validated against this model."
         ),
     )
+    max_validation_retries: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description=(
+            "Number of automatic retries when response_model validation fails. "
+            "On each retry the exact Pydantic errors and the bad JSON are fed "
+            "back to the LLM with a targeted correction prompt. "
+            "Set to 0 to disable retries and raise ResponseModelValidationError "
+            "immediately on the first failure."
+        ),
+    )
     history: list[Message] = Field(
         default_factory=list,
         description="Prior conversation turns for multi-turn chat.",

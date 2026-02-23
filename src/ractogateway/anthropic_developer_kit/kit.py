@@ -23,8 +23,13 @@ from typing import TYPE_CHECKING, Any
 
 from ractogateway._models.chat import ChatConfig
 from ractogateway._models.stream import StreamChunk, StreamDelta
+from ractogateway._validation import (
+    async_validate_and_retry,
+    validate_and_retry,
+    validate_stream_final,
+)
 from ractogateway.adapters.anthropic_kit import AnthropicLLMKit
-from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult, try_parse_json
+from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult
 from ractogateway.exceptions import RactoGatewayError, _wrap_provider_error
 from ractogateway.prompts.engine import RactoPrompt
 
@@ -190,7 +195,18 @@ class AnthropicDeveloperKit:
             max_tokens=config.max_tokens,
             **config.extra,
         )
-        response = _maybe_validate(response, config)
+        response = validate_and_retry(
+            response,
+            config,
+            adapter_run=lambda msg: adapter.run(
+                prompt,
+                msg,
+                tools=config.tools,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+                **config.extra,
+            ),
+        )
 
         if self._exact_cache is not None:
             self._exact_cache.put(
@@ -238,7 +254,18 @@ class AnthropicDeveloperKit:
             max_tokens=config.max_tokens,
             **config.extra,
         )
-        response = _maybe_validate(response, config)
+        response = await async_validate_and_retry(
+            response,
+            config,
+            adapter_arun=lambda msg: adapter.arun(
+                prompt,
+                msg,
+                tools=config.tools,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+                **config.extra,
+            ),
+        )
 
         if self._exact_cache is not None:
             self._exact_cache.put(
@@ -304,7 +331,9 @@ class AnthropicDeveloperKit:
                         if chunk.usage:
                             usage = chunk.usage
                         if chunk.is_final and config.response_model is not None:
-                            _apply_stream_response_model(chunk, config)
+                            chunk.parsed = validate_stream_final(
+                                chunk.accumulated_text, config
+                            )
                         yield chunk
         except RactoGatewayError:
             raise
@@ -349,7 +378,9 @@ class AnthropicDeveloperKit:
                         if chunk.usage:
                             usage = chunk.usage
                         if chunk.is_final and config.response_model is not None:
-                            _apply_stream_response_model(chunk, config)
+                            chunk.parsed = validate_stream_final(
+                                chunk.accumulated_text, config
+                            )
                         yield chunk
         except RactoGatewayError:
             raise
@@ -456,32 +487,3 @@ def _flush_tool_calls(acc: dict[int, dict[str, Any]]) -> list[ToolCallResult]:
     return results
 
 
-def _maybe_validate(response: LLMResponse, config: ChatConfig) -> LLMResponse:
-    if config.response_model is not None and isinstance(response.parsed, dict):
-        try:
-            validated = config.response_model.model_validate(response.parsed)
-            response.parsed = validated.model_dump()
-        except Exception as exc:
-            warning = f"[RactoGateway] response_model validation failed: {exc}"
-            response.content = f"{response.content}\n\n{warning}" if response.content else warning
-    return response
-
-
-def _apply_stream_response_model(chunk: StreamChunk, config: ChatConfig) -> None:
-    """Parse and validate the final chunk's ``accumulated_text`` against ``config.response_model``.
-
-    Mutates *chunk* in-place: sets ``chunk.parsed`` to the validated model
-    dump on success, or to the raw parsed dict when validation fails (so the
-    caller can still inspect the data).  No exception is raised on failure.
-    """
-    if config.response_model is None:
-        return
-    parsed = try_parse_json(chunk.accumulated_text)
-    if isinstance(parsed, dict):
-        try:
-            validated = config.response_model.model_validate(parsed)
-            chunk.parsed = validated.model_dump()
-        except Exception:
-            chunk.parsed = parsed  # best-effort: store raw parsed dict
-    elif parsed is not None:
-        chunk.parsed = parsed
