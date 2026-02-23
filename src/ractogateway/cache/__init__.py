@@ -16,7 +16,7 @@ developer kit constructor::
     kit = gpt.OpenAIDeveloperKit(
         model="gpt-4o",
         exact_cache=ExactMatchCache(max_size=1024),
-        semantic_cache=SemanticCache(embedder=my_embed_fn),
+        semantic_cache=SemanticCache(embed_fn=my_embed_fn),
     )
 """
 

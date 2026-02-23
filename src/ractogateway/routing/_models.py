@@ -34,8 +34,8 @@ class RoutingTier(BaseModel):
     """
 
     model: str = Field(min_length=1, description="Provider model identifier.")
-    max_score: int = Field(
-        default=100,
+    max_score: float = Field(
+        default=100.0,
         ge=0,
         le=100,
         description="Inclusive upper-bound complexity score for this tier.",

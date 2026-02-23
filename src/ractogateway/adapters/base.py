@@ -101,13 +101,17 @@ def strip_markdown_fences(text: str) -> str:
 def try_parse_json(text: str) -> dict[str, Any] | list[Any] | None:
     """Attempt to parse *text* as JSON after stripping fences.
 
-    Returns ``None`` if the text is not valid JSON.
+    Returns ``None`` if the text is not valid JSON or is a JSON primitive
+    (number, boolean, string) — only JSON objects and arrays are returned.
     """
     cleaned = strip_markdown_fences(text)
     try:
-        return json.loads(cleaned)  # type: ignore[no-any-return]
+        result = json.loads(cleaned)
     except (json.JSONDecodeError, TypeError):
         return None
+    if isinstance(result, (dict, list)):
+        return result  # type: ignore[return-value]
+    return None
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ embedder, or any other embedding service::
         # call your embedding API here
         return [0.1, 0.2, ...]
 
-    cache = SemanticCache(embedder=my_embedder, threshold=0.95)
+    cache = SemanticCache(embed_fn=my_embedder, similarity_threshold=0.95)
 
 **Complexity:** O(n) per lookup where n = number of stored entries.  For
 large caches (> 10 k entries) consider using a proper ANN index (e.g. FAISS)
@@ -57,10 +57,10 @@ class SemanticCache:
 
     Parameters
     ----------
-    embedder:
+    embed_fn:
         Any callable ``(text: str) -> list[float]``.  Called once per *new*
         query (cache miss) and once at ``put()`` time.
-    threshold:
+    similarity_threshold:
         Minimum cosine similarity to declare a hit.  Default ``0.95`` is
         intentionally strict to avoid incorrect responses.
     max_size:
@@ -83,19 +83,19 @@ class SemanticCache:
             )
             return r.data[0].embedding
 
-        cache = SemanticCache(embedder=embed, threshold=0.95)
+        cache = SemanticCache(embed_fn=embed, similarity_threshold=0.95)
     """
 
     def __init__(
         self,
-        embedder: EmbedFn,
-        threshold: float = 0.95,
+        embed_fn: EmbedFn,
+        similarity_threshold: float = 0.95,
         max_size: int = 512,
         ttl_seconds: float | None = None,
     ) -> None:
-        self._embedder = embedder
+        self._embedder = embed_fn
         self._config = SemanticCacheConfig(
-            threshold=threshold,
+            threshold=similarity_threshold,
             max_size=max_size,
             ttl_seconds=ttl_seconds,
         )
