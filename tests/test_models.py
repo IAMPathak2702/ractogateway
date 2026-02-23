@@ -39,6 +39,8 @@ def test_chat_config_defaults_are_isolated_per_instance() -> None:
     assert config_one.prompt is None
     assert config_one.tools is None
     assert config_one.response_model is None
+    assert config_one.auto_execute_tools is False
+    assert config_one.max_tool_turns == 3
 
     config_one.history.append(Message(role=MessageRole.USER, content="Earlier turn"))
     config_one.extra["top_p"] = 0.8
@@ -59,6 +61,9 @@ def test_chat_config_validation_constraints() -> None:
 
     with pytest.raises(ValidationError):
         ChatConfig(user_message="ok", max_tokens=0)
+
+    with pytest.raises(ValidationError):
+        ChatConfig(user_message="ok", max_tool_turns=0)
 
 
 def test_chat_config_accepts_pydantic_response_model_type() -> None:

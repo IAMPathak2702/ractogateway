@@ -7,6 +7,7 @@ from typing import Any
 
 from ractogateway.adapters.base import (
     BaseLLMAdapter,
+    ChatTurn,
     FinishReason,
     LLMResponse,
     ToolCallResult,
@@ -25,6 +26,31 @@ def _require_genai() -> Any:
             "Install it with:  pip install ractogateway[google]"
         ) from exc
     return genai
+
+
+def build_google_contents(
+    history: list[ChatTurn] | None,
+    user_message: str,
+) -> Any:
+    """Build a Gemini ``contents`` value that includes prior conversation turns.
+
+    When *history* is empty or ``None`` a plain string is returned (identical
+    to the single-turn behaviour).  With history a list of ``types.Content``
+    objects is returned so the model sees the full conversation context.
+
+    Gemini uses ``"model"`` where OpenAI/Anthropic use ``"assistant"``.
+    """
+    from google.genai import types  # noqa: PLC0415
+
+    if not history:
+        return user_message
+
+    contents: list[Any] = []
+    for turn in history:
+        role = "model" if turn["role"] == "assistant" else turn["role"]
+        contents.append(types.Content(role=role, parts=[types.Part(text=turn["content"])]))
+    contents.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
+    return contents
 
 
 class GoogleLLMKit(BaseLLMAdapter):
@@ -154,6 +180,7 @@ class GoogleLLMKit(BaseLLMAdapter):
         prompt: RactoPrompt,
         user_message: str,
         *,
+        history: list[ChatTurn] | None = None,
         tools: ToolRegistry | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
@@ -169,10 +196,11 @@ class GoogleLLMKit(BaseLLMAdapter):
             **kwargs,
         )
         system_prompt = prompt.compile()
+        contents = build_google_contents(history, user_message)
         try:
             response = client.models.generate_content(
                 model=self.model,
-                contents=user_message,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     **gen_config,
@@ -189,6 +217,7 @@ class GoogleLLMKit(BaseLLMAdapter):
         prompt: RactoPrompt,
         user_message: str,
         *,
+        history: list[ChatTurn] | None = None,
         tools: ToolRegistry | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
@@ -204,10 +233,11 @@ class GoogleLLMKit(BaseLLMAdapter):
             **kwargs,
         )
         system_prompt = prompt.compile()
+        contents = build_google_contents(history, user_message)
         try:
             response = await client.aio.models.generate_content(
                 model=self.model,
-                contents=user_message,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     **gen_config,

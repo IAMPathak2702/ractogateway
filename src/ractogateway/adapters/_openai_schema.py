@@ -72,7 +72,7 @@ _STRIP_KEYWORDS: frozenset[str] = frozenset(
 
 #: Compound schema keywords that OpenAI Structured Outputs does not support and
 #: that *cannot* be safely removed — we raise early with a helpful message.
-_UNSUPPORTED_COMPOUND: frozenset[str] = frozenset({"not", "if", "then", "else", "allOf"})
+_UNSUPPORTED_COMPOUND: tuple[str, ...] = ("not", "if", "then", "else", "allOf")
 
 #: Primitive types supported by OpenAI Structured Outputs.
 _SUPPORTED_TYPES: frozenset[str] = frozenset(

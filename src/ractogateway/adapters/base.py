@@ -11,7 +11,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -39,6 +39,13 @@ class ToolCallResult(BaseModel):
     id: str = ""
     name: str
     arguments: dict[str, Any]
+
+
+class ChatTurn(TypedDict):
+    """One prior chat message used as conversational history."""
+
+    role: Literal["system", "user", "assistant"]
+    content: str
 
 
 class LLMResponse(BaseModel):
@@ -156,6 +163,7 @@ class BaseLLMAdapter(ABC):
         prompt: RactoPrompt,
         user_message: str,
         *,
+        history: list[ChatTurn] | None = None,
         tools: ToolRegistry | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
@@ -169,6 +177,7 @@ class BaseLLMAdapter(ABC):
         prompt: RactoPrompt,
         user_message: str,
         *,
+        history: list[ChatTurn] | None = None,
         tools: ToolRegistry | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,

@@ -68,6 +68,23 @@ class ChatConfig(BaseModel):
         default=None,
         description="Tool registry for function/tool calling.",
     )
+    auto_execute_tools: bool = Field(
+        default=False,
+        description=(
+            "When True, chat() / achat() automatically execute requested tools "
+            "from the provided ToolRegistry and continue the model loop until a "
+            "final non-tool response is produced or max_tool_turns is reached."
+        ),
+    )
+    max_tool_turns: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description=(
+            "Maximum number of automatic tool-call rounds when "
+            "auto_execute_tools=True."
+        ),
+    )
     response_model: type[BaseModel] | None = Field(
         default=None,
         description=(

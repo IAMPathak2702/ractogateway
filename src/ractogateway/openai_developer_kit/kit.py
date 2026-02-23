@@ -21,10 +21,16 @@ from typing import TYPE_CHECKING, Any
 from ractogateway._models.chat import ChatConfig
 from ractogateway._models.embedding import EmbeddingConfig, EmbeddingResponse, EmbeddingVector
 from ractogateway._models.stream import StreamChunk, StreamDelta
+from ractogateway._tool_runtime import (
+    build_tool_followup_user_message,
+    execute_tool_calls_async,
+    execute_tool_calls_sync,
+)
 from ractogateway._validation import (
     async_validate_and_retry,
     validate_and_retry,
     validate_stream_final,
+    with_inferred_response_model,
 )
 from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult
 from ractogateway.adapters.openai_kit import OpenAILLMKit
@@ -204,6 +210,7 @@ class OpenAIDeveloperKit:
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
+        validation_config = with_inferred_response_model(config, prompt)
         system_prompt = prompt.compile()
 
         # Exact-match cache lookup
@@ -226,26 +233,53 @@ class OpenAIDeveloperKit:
 
         # API call
         adapter = self._get_adapter(model)
-        response = adapter.run(
-            prompt,
-            config.user_message,
-            tools=config.tools,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-            **config.extra,
+        original_user_message = config.user_message
+        history_turns = (
+            [{"role": m.role, "content": m.content} for m in config.history]
+            if config.history
+            else None
         )
-        response = validate_and_retry(
-            response,
-            config,
-            adapter_run=lambda msg: adapter.run(
+
+        def _run_validated(user_message: str) -> LLMResponse:
+            raw = adapter.run(
                 prompt,
-                msg,
+                user_message,
+                history=history_turns,
                 tools=config.tools,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
                 **config.extra,
-            ),
-        )
+            )
+            return validate_and_retry(
+                raw,
+                validation_config,
+                adapter_run=lambda msg: adapter.run(
+                    prompt,
+                    msg,
+                    history=history_turns,
+                    tools=config.tools,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    **config.extra,
+                ),
+            )
+
+        response = _run_validated(config.user_message)
+
+        if config.auto_execute_tools and config.tools is not None:
+            for _ in range(config.max_tool_turns):
+                if (
+                    response.finish_reason is not FinishReason.TOOL_CALL
+                    or not response.tool_calls
+                ):
+                    break
+                results = execute_tool_calls_sync(response.tool_calls, config.tools)
+                follow_up_message = build_tool_followup_user_message(
+                    original_user_message=original_user_message,
+                    tool_calls=response.tool_calls,
+                    results=results,
+                )
+                response = _run_validated(follow_up_message)
 
         # Write to caches
         if self._exact_cache is not None:
@@ -267,6 +301,7 @@ class OpenAIDeveloperKit:
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
+        validation_config = with_inferred_response_model(config, prompt)
         system_prompt = prompt.compile()
 
         # Exact-match cache lookup
@@ -289,26 +324,56 @@ class OpenAIDeveloperKit:
 
         # API call
         adapter = self._get_adapter(model)
-        response = await adapter.arun(
-            prompt,
-            config.user_message,
-            tools=config.tools,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-            **config.extra,
+        original_user_message = config.user_message
+        history_turns = (
+            [{"role": m.role, "content": m.content} for m in config.history]
+            if config.history
+            else None
         )
-        response = await async_validate_and_retry(
-            response,
-            config,
-            adapter_arun=lambda msg: adapter.arun(
+
+        async def _arun_validated(user_message: str) -> LLMResponse:
+            raw = await adapter.arun(
                 prompt,
-                msg,
+                user_message,
+                history=history_turns,
                 tools=config.tools,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
                 **config.extra,
-            ),
-        )
+            )
+            return await async_validate_and_retry(
+                raw,
+                validation_config,
+                adapter_arun=lambda msg: adapter.arun(
+                    prompt,
+                    msg,
+                    history=history_turns,
+                    tools=config.tools,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    **config.extra,
+                ),
+            )
+
+        response = await _arun_validated(config.user_message)
+
+        if config.auto_execute_tools and config.tools is not None:
+            for _ in range(config.max_tool_turns):
+                if (
+                    response.finish_reason is not FinishReason.TOOL_CALL
+                    or not response.tool_calls
+                ):
+                    break
+                results = await execute_tool_calls_async(
+                    response.tool_calls,
+                    config.tools,
+                )
+                follow_up_message = build_tool_followup_user_message(
+                    original_user_message=original_user_message,
+                    tool_calls=response.tool_calls,
+                    results=results,
+                )
+                response = await _arun_validated(follow_up_message)
 
         # Write to caches
         if self._exact_cache is not None:
@@ -342,11 +407,18 @@ class OpenAIDeveloperKit:
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
+        validation_config = with_inferred_response_model(config, prompt)
         adapter = self._get_adapter(model)
         client = self._sync_client()
+        history_turns = (
+            [{"role": m.role, "content": m.content} for m in config.history]
+            if config.history
+            else None
+        )
         request = adapter._build_request(
             prompt,
             config.user_message,
+            history=history_turns,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -368,9 +440,9 @@ class OpenAIDeveloperKit:
                     )
                     if chunk is not None:
                         accumulated = chunk.accumulated_text
-                        if chunk.is_final and config.response_model is not None:
+                        if chunk.is_final and validation_config.response_model is not None:
                             chunk.parsed = validate_stream_final(
-                                chunk.accumulated_text, config
+                                chunk.accumulated_text, validation_config
                             )
                         yield chunk
         except RactoGatewayError:
@@ -383,11 +455,18 @@ class OpenAIDeveloperKit:
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
+        validation_config = with_inferred_response_model(config, prompt)
         adapter = self._get_adapter(model)
         client = self._async_client()
+        history_turns = (
+            [{"role": m.role, "content": m.content} for m in config.history]
+            if config.history
+            else None
+        )
         request = adapter._build_request(
             prompt,
             config.user_message,
+            history=history_turns,
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -409,9 +488,9 @@ class OpenAIDeveloperKit:
                     )
                     if chunk is not None:
                         accumulated = chunk.accumulated_text
-                        if chunk.is_final and config.response_model is not None:
+                        if chunk.is_final and validation_config.response_model is not None:
                             chunk.parsed = validate_stream_final(
-                                chunk.accumulated_text, config
+                                chunk.accumulated_text, validation_config
                             )
                         yield chunk
         except RactoGatewayError:
@@ -569,5 +648,3 @@ def _normalise_openai_embedding(
             "total_tokens": raw.usage.total_tokens,
         }
     return EmbeddingResponse(vectors=vectors, model=model, usage=usage, raw=raw)
-
-

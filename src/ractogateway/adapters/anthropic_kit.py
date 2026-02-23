@@ -7,6 +7,7 @@ from typing import Any
 
 from ractogateway.adapters.base import (
     BaseLLMAdapter,
+    ChatTurn,
     FinishReason,
     LLMResponse,
     ToolCallResult,
@@ -137,6 +138,7 @@ class AnthropicLLMKit(BaseLLMAdapter):
         prompt: RactoPrompt,
         user_message: str,
         *,
+        history: list[ChatTurn] | None = None,
         tools: ToolRegistry | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
@@ -146,6 +148,7 @@ class AnthropicLLMKit(BaseLLMAdapter):
         request = self._build_request(
             prompt,
             user_message,
+            history=history,
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -164,6 +167,7 @@ class AnthropicLLMKit(BaseLLMAdapter):
         prompt: RactoPrompt,
         user_message: str,
         *,
+        history: list[ChatTurn] | None = None,
         tools: ToolRegistry | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
@@ -173,6 +177,7 @@ class AnthropicLLMKit(BaseLLMAdapter):
         request = self._build_request(
             prompt,
             user_message,
+            history=history,
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -195,16 +200,22 @@ class AnthropicLLMKit(BaseLLMAdapter):
         prompt: RactoPrompt,
         user_message: str,
         *,
+        history: list[ChatTurn] | None = None,
         tools: ToolRegistry | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
         **kwargs: Any,
     ) -> dict[str, Any]:
         system_prompt = prompt.compile()
+        history_msgs = (
+            [{"role": t["role"], "content": t["content"]} for t in history]
+            if history
+            else []
+        )
         request: dict[str, Any] = {
             "model": self.model,
             "system": system_prompt,
-            "messages": [{"role": "user", "content": user_message}],
+            "messages": [*history_msgs, {"role": "user", "content": user_message}],
             "temperature": temperature,
             "max_tokens": max_tokens,
         }

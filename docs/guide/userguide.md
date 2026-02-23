@@ -426,7 +426,9 @@ config = gpt.ChatConfig(
     # Plain: "Validate the AI's JSON answer against this Python class"
     # Technical: type[BaseModel]. After the API call, the raw JSON content is
     #            parsed and validated via ProductReview.model_validate().
-    #            On failure, a warning is appended to response.content — no exception.
+    #            On repeated failure, ResponseModelValidationError is raised.
+    #            If omitted and prompt.output_format is a BaseModel, the kit
+    #            infers response_model automatically.
 
     history=[],
     # Plain: "Previous messages in the conversation (for multi-turn chat)"
@@ -438,6 +440,15 @@ config = gpt.ChatConfig(
     # Plain: "Python functions the AI is allowed to call"
     # Technical: ToolRegistry instance. The adapter serialises its schemas into
     #            provider-specific function-calling format before the API call.
+
+    auto_execute_tools=False,
+    # Plain: "Should the kit execute tool calls automatically and return final content?"
+    # Technical: If True, chat()/achat() run a local tool loop:
+    #            LLM tool call -> execute registry callables -> follow-up LLM call.
+
+    max_tool_turns=3,
+    # Plain: "How many tool-call rounds are allowed in auto mode?"
+    # Technical: Safety cap for auto_execute_tools loop. Range 1..10.
 
     extra={},
     # Plain: "Any other provider-specific settings I want to pass"
@@ -507,7 +518,7 @@ print(report.uv_index)       # 3
 print(type(report))          # <class '__main__.WeatherReport'>
 ```
 
-> **Why two places?** `output_format` in `RactoPrompt` tells the LLM what to generate (embeds the JSON Schema in the system prompt). `response_model` in `ChatConfig` validates the output in Python. Use both together for end-to-end type safety.
+> **Why two places?** `output_format` in `RactoPrompt` tells the LLM what to generate (embeds the JSON Schema in the system prompt). `response_model` in `ChatConfig` validates the output in Python. Use both together for maximum safety. If you omit `response_model`, the kits now infer it automatically when `prompt.output_format` is a Pydantic model class.
 
 ---
 
@@ -886,44 +897,47 @@ asyncio.run(main())
 
 ## 12. Tool Calling
 
-Tool calling lets the LLM trigger your Python functions. Useful for giving AI access to live data (weather, databases, calculators, etc.).
+Tool calling lets the LLM trigger your Python functions. Useful for live data,
+calculators, search, and business actions.
 
-### Step 1 — Define your tools with the `@tool` decorator
+### Step 1 ? Define tools and register them
 
 ```python
 from ractogateway.tools.registry import tool, ToolRegistry
 
-@tool
+registry = ToolRegistry()
+
+@tool(registry)
 def get_weather(city: str, unit: str = "celsius") -> str:
-    """Get the current weather for a city.
+    """Get the current weather for a city."""
+    return f"The weather in {city} is 22?{'C' if unit == 'celsius' else 'F'} and sunny."
 
-    city: The name of the city to look up.
-    unit: Temperature unit — 'celsius' or 'fahrenheit'.
-    """
-    # In a real app, call a weather API here
-    return f"The weather in {city} is 22°{'C' if unit == 'celsius' else 'F'} and sunny."
-
-@tool
+@tool(registry)
 def get_time(timezone: str) -> str:
-    """Return the current time in the given timezone.
-
-    timezone: IANA timezone string, e.g. 'Europe/London'.
-    """
+    """Return the current time in the given timezone."""
     from datetime import datetime
     import zoneinfo
+
     tz = zoneinfo.ZoneInfo(timezone)
     return datetime.now(tz).strftime("%H:%M on %A, %d %B %Y")
+
+print(list(registry.tools.keys()))  # ['get_weather', 'get_time']
 ```
 
-### Step 2 — Register them in a `ToolRegistry`
+You can also use `@tool` without a registry and register later:
 
 ```python
-registry = ToolRegistry()
-registry.register(get_weather)
-registry.register(get_time)
+@tool
+def calculate(expression: str) -> float:
+    return eval(expression)  # noqa: S307
+
+registry.register(calculate)
 ```
 
-### Step 3 — Pass the registry to `ChatConfig`
+### Step 2 ? One-call final answer (recommended)
+
+Set `auto_execute_tools=True` to keep `response.content` behavior consistent with
+non-tool requests.
 
 ```python
 from ractogateway.prompts.engine import RactoPrompt
@@ -943,36 +957,36 @@ kit = gpt.OpenAIDeveloperKit(
 config = gpt.ChatConfig(
     user_message="What's the weather like in Paris and what time is it there?",
     tools=registry,
+    auto_execute_tools=True,
+    max_tool_turns=3,
 )
 
 response = kit.chat(config)
+print(response.content)  # Final integrated answer
+```
 
-# If the model decided to call tools:
+### Step 3 ? Manual tool loop (advanced)
+
+If you prefer full control, keep `auto_execute_tools=False` (default) and execute
+`response.tool_calls` yourself.
+
+```python
+response = kit.chat(
+    gpt.ChatConfig(
+        user_message="What's the weather in Tokyo and what is 12 * 8?",
+        tools=registry,
+    )
+)
+
 if response.tool_calls:
     for tc in response.tool_calls:
-        print(f"Tool requested: {tc.name}")
-        print(f"Arguments:      {tc.arguments}")
-
-        # Execute the actual Python function
         fn = registry.get_callable(tc.name)
         if fn:
-            result = fn(**tc.arguments)
-            print(f"Result:         {result}")
+            print(tc.name, tc.arguments, "->", fn(**tc.arguments))
 ```
 
-**Expected output:**
-
-```
-Tool requested: get_weather
-Arguments:      {'city': 'Paris', 'unit': 'celsius'}
-Result:         The weather in Paris is 22°C and sunny.
-
-Tool requested: get_time
-Arguments:      {'timezone': 'Europe/Paris'}
-Result:         14:32 on Monday, 24 February 2026
-```
-
-> **What is `ToolCallResult`?** It has three fields: `id` (unique call ID from the API), `name` (function name), and `arguments` (dict of parsed arguments ready to `**unpack` into your function).
+> **What is `ToolCallResult`?** It has three fields: `id` (unique call ID from the API),
+> `name` (function name), and `arguments` (dict ready to `**unpack` into your function).
 
 ---
 
@@ -1598,18 +1612,19 @@ kit = gpt.OpenAIDeveloperKit(model="gpt-4o-mini", default_prompt=my_prompt)
 response = kit.chat(gpt.ChatConfig(user_message="Hello", prompt=my_prompt))
 ```
 
-### Mistake 5: Not passing `response_model` to `ChatConfig` when you expect a typed object
+### Mistake 5: Expecting typed validation but not setting it explicitly
 
 ```python
-# WRONG — response.parsed will be a dict, NOT a validated WeatherReport instance
+# BEST PRACTICE ? set response_model explicitly
 prompt = RactoPrompt(..., output_format=WeatherReport)
-config = gpt.ChatConfig(user_message="...")   # ❌ missing response_model=
-
-# CORRECT — also validate in ChatConfig
 config = gpt.ChatConfig(
     user_message="...",
-    response_model=WeatherReport,   # ✅
+    response_model=WeatherReport,   # ? explicit validation contract
 )
+
+# ALSO SUPPORTED ? inferred automatically from output_format model
+prompt = RactoPrompt(..., output_format=WeatherReport)
+config = gpt.ChatConfig(user_message="...")  # ? inferred from prompt.output_format
 ```
 
 ### Mistake 6: Missing `await` on async methods

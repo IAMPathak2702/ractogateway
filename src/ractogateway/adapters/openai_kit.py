@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ractogateway.adapters._openai_schema import build_response_format
 from ractogateway.adapters.base import (
     BaseLLMAdapter,
+    ChatTurn,
     FinishReason,
     LLMResponse,
     ToolCallResult,
@@ -157,6 +158,7 @@ class OpenAILLMKit(BaseLLMAdapter):
         prompt: RactoPrompt,
         user_message: str,
         *,
+        history: list[ChatTurn] | None = None,
         tools: ToolRegistry | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
@@ -166,6 +168,7 @@ class OpenAILLMKit(BaseLLMAdapter):
         request = self._build_request(
             prompt,
             user_message,
+            history=history,
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -184,6 +187,7 @@ class OpenAILLMKit(BaseLLMAdapter):
         prompt: RactoPrompt,
         user_message: str,
         *,
+        history: list[ChatTurn] | None = None,
         tools: ToolRegistry | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
@@ -193,6 +197,7 @@ class OpenAILLMKit(BaseLLMAdapter):
         request = self._build_request(
             prompt,
             user_message,
+            history=history,
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -215,12 +220,20 @@ class OpenAILLMKit(BaseLLMAdapter):
         prompt: RactoPrompt,
         user_message: str,
         *,
+        history: list[ChatTurn] | None = None,
         tools: ToolRegistry | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
         **kwargs: Any,
     ) -> dict[str, Any]:
         messages = prompt.to_messages(user_message, provider="openai")
+        if history:
+            # Splice history turns between the system message and the current user message.
+            messages = [
+                messages[0],
+                *[{"role": t["role"], "content": t["content"]} for t in history],
+                messages[-1],
+            ]
         request: dict[str, Any] = {
             "model": self.model,
             "messages": messages,

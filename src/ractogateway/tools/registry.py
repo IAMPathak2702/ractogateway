@@ -253,19 +253,36 @@ def _parse_param_docs(docstring: str) -> dict[str, str]:
 
 
 def tool(
-    fn: Callable[..., Any] | None = None,
+    fn: Callable[..., Any] | ToolRegistry | None = None,
     *,
     name: str | None = None,
     description: str | None = None,
+    registry: ToolRegistry | None = None,
 ) -> Callable[..., Any]:
     """Decorator that marks a function as an LLM-callable tool.
 
     Can be used bare (``@tool``) or with overrides
     (``@tool(name="my_tool", description="…")``).
 
+    You can also bind registration directly:
+    ``@tool(registry)`` or ``@tool(registry=registry)``.
+
     The decorated function gains a ``_tool_schema`` attribute containing
     the canonical ``ToolSchema``.
     """
+    bound_registry = registry
+    if fn is not None and not callable(fn):
+        maybe_registry = fn
+        if not isinstance(maybe_registry, ToolRegistry):
+            raise TypeError(
+                "tool() first argument must be a callable or ToolRegistry instance."
+            )
+        if bound_registry is not None and maybe_registry is not bound_registry:
+            raise TypeError(
+                "tool() received different registries via positional and keyword args."
+            )
+        bound_registry = maybe_registry
+        fn = None
 
     def _wrap(f: Callable[..., Any]) -> Callable[..., Any]:
         schema = _schema_from_function(f)
@@ -274,6 +291,8 @@ def tool(
         if description is not None:
             schema.description = description
         f._tool_schema = schema  # type: ignore[attr-defined]
+        if bound_registry is not None:
+            bound_registry.register(f)
         return f
 
     if fn is not None:
@@ -366,6 +385,11 @@ class ToolRegistry:
     def schemas(self) -> list[ToolSchema]:
         """Return all registered tool schemas."""
         return list(self._tools.values())
+
+    @property
+    def tools(self) -> dict[str, ToolSchema]:
+        """Backward-compatible mapping of tool name -> schema."""
+        return self._tools
 
     def get_schema(self, name: str) -> ToolSchema | None:
         """Look up a single tool schema by name."""
