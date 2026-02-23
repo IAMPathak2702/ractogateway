@@ -352,14 +352,14 @@ print(response.content)
 # brackets, like my_list = [1, "hello", True]. You can add, remove, or
 # change items at any time!
 
-print(f"Model used: {response.model}")
-# Model used: gpt-4o-mini
-
 print(f"Tokens used: {response.usage}")
 # Tokens used: {'prompt_tokens': 127, 'completion_tokens': 54, 'total_tokens': 181}
 
 print(f"Why did generation stop: {response.finish_reason}")
 # Why did generation stop: FinishReason.STOP
+
+# Provider-specific fields (e.g. which model ran) live in the raw response:
+print(response.raw.model)   # gpt-4o-mini  (OpenAI ChatCompletion object)
 ```
 
 ### What is `LLMResponse`?
@@ -368,13 +368,12 @@ The return type of `kit.chat()` is an `LLMResponse` object. Here are its key fie
 
 | Field | Type | Plain English | Technical |
 |---|---|---|---|
-| `content` | `str \| None` | The AI's answer as a string | Raw text of the completion |
-| `parsed` | `dict \| BaseModel \| None` | The answer as structured data (when using `response_model`) | JSON-decoded dict or validated Pydantic instance |
-| `model` | `str` | Which model was actually used | Model ID echoed from the API response |
+| `content` | `str \| None` | The AI's answer as a string | Raw text of the completion (markdown fences auto-stripped) |
+| `parsed` | `dict \| list \| None` | The answer as structured data (when response is valid JSON) | JSON-decoded via `try_parse_json()`; further validated when `response_model` is set |
 | `finish_reason` | `FinishReason` | Why the AI stopped generating | Enum: `STOP` (natural end), `LENGTH` (hit max_tokens), `TOOL_CALL` |
 | `usage` | `dict[str, int]` | How many tokens were used | `prompt_tokens`, `completion_tokens`, `total_tokens` |
 | `tool_calls` | `list[ToolCallResult]` | Any tools the AI wanted to call | Non-empty when the model returns a function-call intent |
-| `raw` | `Any` | The raw provider response object | Original SDK response; useful for debugging |
+| `raw` | `Any` | The raw provider response object | Original SDK object (e.g. `openai.ChatCompletion`); use `response.raw.model` to get the model name |
 
 ---
 
@@ -990,7 +989,8 @@ kit = gpt.OpenAIDeveloperKit(
 
 # "2+2" → very low complexity score → routed to gpt-4o-mini (cheapest)
 r1 = kit.chat(gpt.ChatConfig(user_message="What is 2 + 2?"))
-print(r1.model)   # gpt-4o-mini
+print(r1.content)        # 4
+print(r1.raw.model)      # gpt-4o-mini  (model name lives in the raw provider object)
 
 # Complex reasoning → high score → routed to o3-mini
 r2 = kit.chat(gpt.ChatConfig(
@@ -999,7 +999,7 @@ r2 = kit.chat(gpt.ChatConfig(
         "and its implications for formal systems and computability theory."
     )
 ))
-print(r2.model)   # o3-mini
+print(r2.raw.model)      # o3-mini
 ```
 
 ### Combining All Middleware
