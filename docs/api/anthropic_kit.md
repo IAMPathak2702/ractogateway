@@ -3,14 +3,16 @@
 ```{eval-rst}
 .. autoclass:: ractogateway.anthropic_developer_kit.AnthropicDeveloperKit
    :members:
+   :undoc-members:
    :show-inheritance:
 ```
 
 ## Short alias
 
-``Chat`` is an alias for ``AnthropicDeveloperKit``:
+`Chat` is an alias for `AnthropicDeveloperKit`:
 
-.. code-block:: python
+```python
+from ractogateway import anthropic_developer_kit as claude
 
-   from ractogateway import anthropic_developer_kit as claude
-   kit = claude.Chat(model="claude-sonnet-4-6")
+kit = claude.Chat(model="claude-sonnet-4-6")
+```

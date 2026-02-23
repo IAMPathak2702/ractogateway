@@ -14,6 +14,8 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 ## Table of Contents
 
 - [Why RactoGateway?](#why-ractogateway)
+  - [Use-Case Map](#use-case-map)
+  - [Why It Stands Different](#why-it-stands-different)
 - [Installation](#installation)
 - [5-Line Quick Start](#5-line-quick-start)
 - [RACTO Prompt Engine](#racto-prompt-engine)
@@ -74,6 +76,40 @@ RactoGateway solves this by providing:
 - **Redis rate limiter** — fleet-wide token-budget enforcement per user ID, safe across concurrent processes
 - **Redis chat memory** — sliding-window conversation history backed by Redis Lists, survives rolling deployments
 - **Celery task queue** — background generation, retry-safe workflows, and parallel inference across worker nodes
+
+### Use-Case Map
+
+RactoGateway is designed to cover the full lifecycle from prototype to production.  
+These are the most common real-world use cases and the built-in modules used for each:
+
+| Use case | What teams usually struggle with | How RactoGateway solves it |
+| --- | --- | --- |
+| Build a production chatbot/API endpoint | Different SDKs, request formats, and response parsing rules | Use one `ChatConfig` + one `LLMResponse` shape across OpenAI, Gemini, and Claude |
+| Return strict JSON for backend automation | Models wrap JSON in markdown fences or drift from schema | `RactoPrompt(output_format=YourModel)` embeds JSON Schema and auto-cleans/parses JSON |
+| Add tool calling to business workflows | Provider-specific function-calling payloads and parsing | Register Python functions once with `ToolRegistry`; execute tool calls through a unified interface |
+| Add streaming UX in web/mobile apps | Different stream event formats per provider | Consume typed `StreamChunk` objects (`delta`, `accumulated_text`, `is_final`, `usage`) |
+| Build retrieval-augmented assistants (RAG) | Integrating readers, chunkers, embedders, stores, and retrieval prompts | `RactoRAG` handles ingest -> embed -> store -> retrieve -> generate with pluggable components |
+| Analyze PDFs/images alongside text prompts | Multimodal payload formats vary by provider | `RactoFile` + `to_messages(provider=...)` translates content blocks automatically |
+| Keep costs predictable at scale | Duplicate requests, overpowered model usage, token overruns | Exact cache, semantic cache, cost-aware routing (`model="auto"`), and token truncation |
+| Run resilient background AI jobs | Long-running tasks fail in request threads | `RactoCeleryWorker` supports retries, async ingestion, and parallel fan-out |
+| Operate across many app servers | In-memory cache/memory/rate limits do not scale horizontally | Redis modules provide distributed cache, fleet-wide limiter, and shared chat memory |
+| Plug into MCP ecosystems | Extra glue to expose or consume tool servers | Built-in MCP server/client/multi-client + agent loop for stdio/SSE flows |
+| Fine-tune and ship provider-specific models | Data formatting and job lifecycle management differ by platform | Unified dataset APIs plus provider adapters for OpenAI, Gemini, and Anthropic fine-tuning |
+
+### Why It Stands Different
+
+Most libraries solve one layer (only chat calls, only RAG, or only prompting).  
+RactoGateway is different because it combines provider abstraction, strict typing, and production infrastructure in one package.
+
+| Dimension | Typical approach | RactoGateway approach | Practical impact |
+| --- | --- | --- | --- |
+| Provider support | Rebuild code when switching SDKs | Same mental model across OpenAI, Gemini, Claude | Easier migration and multi-provider strategy |
+| Prompt reliability | Ad-hoc strings scattered across code | Structured RACTO prompt model with guardrails | More consistent outputs and fewer hallucinations |
+| Output safety | Manual `json.loads` and fragile parsing | Typed response models + automatic JSON cleanup | Less runtime parsing failure in APIs/jobs |
+| Tool integration | Vendor-specific tool schemas | Single `ToolRegistry` and normalized `ToolCallResult` | Faster implementation of tool-based assistants |
+| End-to-end RAG | Stitch multiple libraries together | One orchestrator with swappable readers/stores/embedders | Shorter path from idea to working RAG |
+| Scale and operations | Teams bolt infra on later | Redis, Celery, batching, routing, and caching are first-class | Better cost, reliability, and throughput from day one |
+| Extensibility | Hard to mix low-level and high-level APIs | High-level kits plus low-level gateway in the same architecture | Use simple APIs first, drop lower only where needed |
 
 ---
 

@@ -1,8 +1,12 @@
 # API Reference
 
+The pages below are hand-curated entry points. For exhaustive coverage of
+every package/module in `src/ractogateway`, use **Complete Module Reference**.
+
 ```{toctree}
 :maxdepth: 2
 
+modules/index
 prompts
 tools
 adapters

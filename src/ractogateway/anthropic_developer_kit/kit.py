@@ -128,6 +128,11 @@ class AnthropicDeveloperKit:
         return anthropic.AsyncAnthropic(**kw)
 
     def _resolve_prompt(self, config: ChatConfig) -> RactoPrompt:
+        if not isinstance(config, ChatConfig):
+            raise TypeError(
+                f"chat() expects a ChatConfig object, got {type(config).__name__!r}. "
+                "Example: kit.chat(ChatConfig(user_message='Hello'))"
+            )
         prompt = config.prompt or self._default_prompt
         if prompt is None:
             raise ValueError(
