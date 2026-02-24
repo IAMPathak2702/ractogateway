@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
 
 from ractogateway.rag._models.document import Document
 from ractogateway.rag.readers.base import BaseReader
@@ -65,33 +66,59 @@ class HtmlReader(BaseReader):
     """Extract visible text from HTML files using the stdlib HTML parser.
 
     No external dependencies required.
+
+    Accepts a file path (``str`` / ``Path``), raw ``bytes``, or any binary
+    file-like object with a ``.read()`` method.
     """
 
     @property
     def supported_extensions(self) -> frozenset[str]:
         return frozenset({".html", ".htm", ".xhtml"})
 
-    def read(self, path: Path) -> Document:
+    def _read_path(self, path: Path) -> Document:
         try:
             raw_html = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             raw_html = path.read_text(encoding="latin-1")
 
+        return self._parse_html(
+            raw_html,
+            source=str(path.resolve()),
+            path_meta={
+                "extension": path.suffix.lower(),
+                "filename": path.name,
+                "size_bytes": path.stat().st_size,
+            },
+        )
+
+    def _read_bytes(self, data: bytes, *, source_label: str = "<bytes>") -> Document:
+        try:
+            raw_html = data.decode("utf-8")
+        except UnicodeDecodeError:
+            raw_html = data.decode("latin-1")
+
+        return self._parse_html(
+            raw_html,
+            source=source_label,
+            path_meta={"size_bytes": len(data)},
+        )
+
+    def _parse_html(
+        self,
+        raw_html: str,
+        *,
+        source: str,
+        path_meta: dict[str, Any],
+    ) -> Document:
         extractor = _TextExtractor()
         extractor.feed(raw_html)
         content = extractor.get_text()
 
-        # Extract title if present
         title_match = re.search(r"<title[^>]*>([^<]+)</title>", raw_html, re.IGNORECASE)
         title = title_match.group(1).strip() if title_match else ""
 
         return Document(
             content=content,
-            source=str(path.resolve()),
-            metadata={
-                "extension": path.suffix.lower(),
-                "filename": path.name,
-                "size_bytes": path.stat().st_size,
-                "title": title,
-            },
+            source=source,
+            metadata={"title": title, **path_meta},
         )

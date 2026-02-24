@@ -14,7 +14,7 @@ import pytest
 from ractogateway._models.chat import ChatConfig, Message, MessageRole
 from ractogateway.adapters.anthropic_kit import AnthropicLLMKit
 from ractogateway.adapters.base import ChatTurn
-from ractogateway.adapters.google_kit import GoogleLLMKit, build_google_contents
+from ractogateway.adapters.google_kit import build_google_contents
 from ractogateway.adapters.openai_kit import OpenAILLMKit
 from ractogateway.prompts.engine import RactoPrompt
 
@@ -92,9 +92,11 @@ class TestOpenAIHistoryInMessages:
         mock_client = MagicMock()
         mock_client.chat.completions.create.side_effect = _fake_create
 
-        with patch.object(adapter, "_make_client", return_value=mock_client):
-            with pytest.raises(Exception):  # _wrap_provider_error wraps RuntimeError
-                adapter.run(_PROMPT, "What is my name?", history=_HISTORY)
+        with (
+            patch.object(adapter, "_make_client", return_value=mock_client),
+            pytest.raises(RuntimeError),
+        ):
+            adapter.run(_PROMPT, "What is my name?", history=_HISTORY)
 
         assert captured, "API was never called"
         messages = captured[0]["messages"]
@@ -141,9 +143,11 @@ class TestAnthropicHistoryInMessages:
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = _fake_create
 
-        with patch.object(adapter, "_make_client", return_value=mock_client):
-            with pytest.raises(Exception):  # _wrap_provider_error wraps RuntimeError
-                adapter.run(_PROMPT, "What is my name?", history=_HISTORY)
+        with (
+            patch.object(adapter, "_make_client", return_value=mock_client),
+            pytest.raises(RuntimeError),
+        ):
+            adapter.run(_PROMPT, "What is my name?", history=_HISTORY)
 
         assert captured, "API was never called"
         messages = captured[0]["messages"]
@@ -209,9 +213,8 @@ class TestOpenAIKitHistory:
         with patch(
             "ractogateway.adapters.openai_kit.OpenAILLMKit._make_client",
             return_value=mock_client,
-        ):
-            with pytest.raises(Exception):  # _wrap_provider_error wraps RuntimeError
-                kit.chat(_alex_config())
+        ), pytest.raises(RuntimeError):
+            kit.chat(_alex_config())
 
         assert captured, "API was never called"
         messages = captured[0]["messages"]

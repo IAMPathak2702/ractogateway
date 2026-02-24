@@ -25,6 +25,9 @@ def _require_openpyxl() -> Any:
 from ractogateway.rag._models.document import Document
 from ractogateway.rag.readers.base import BaseReader
 
+# Magic bytes: ZIP (PK header) — all XLSX/XLSM files are ZIP archives
+_XLSX_MAGIC = b"PK\x03\x04"
+
 
 class SpreadsheetReader(BaseReader):
     """Read CSV and Excel spreadsheets into plain text.
@@ -32,6 +35,11 @@ class SpreadsheetReader(BaseReader):
     Each row is rendered as a tab-separated line; an optional header row is
     prepended.  Multiple sheets in an XLSX workbook are separated by a
     ``--- Sheet: <name> ---`` divider.
+
+    Accepts a file path (``str`` / ``Path``), raw ``bytes``, or any binary
+    file-like object with a ``.read()`` method.  When bytes/buffer are
+    provided, XLSX format is detected via the ZIP magic header
+    (``PK\\x03\\x04``); everything else is treated as CSV/TSV.
 
     Parameters
     ----------
@@ -53,31 +61,38 @@ class SpreadsheetReader(BaseReader):
     def supported_extensions(self) -> frozenset[str]:
         return frozenset({".csv", ".tsv", ".xlsx", ".xls"})
 
-    def read(self, path: Path) -> Document:
+    # ------------------------------------------------------------------
+    # Path-based entry point
+    # ------------------------------------------------------------------
+
+    def _read_path(self, path: Path) -> Document:
         ext = path.suffix.lower()
         if ext in {".csv", ".tsv"}:
-            return self._read_csv(path)
-        return self._read_xlsx(path)
+            return self._read_csv_path(path)
+        return self._read_xlsx_path(path)
 
     # ------------------------------------------------------------------
-    # CSV
+    # Bytes / buffer entry point
     # ------------------------------------------------------------------
 
-    def _read_csv(self, path: Path) -> Document:
+    def _read_bytes(self, data: bytes, *, source_label: str = "<bytes>") -> Document:
+        if data[:4] == _XLSX_MAGIC:
+            return self._read_xlsx_bytes(data, source_label)
+        return self._read_csv_bytes(data, source_label)
+
+    # ------------------------------------------------------------------
+    # CSV — path
+    # ------------------------------------------------------------------
+
+    def _read_csv_path(self, path: Path) -> Document:
         try:
             raw = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             raw = path.read_text(encoding="latin-1")
 
-        dialect = csv.Sniffer().sniff(raw[:4096], delimiters=",\t;|")
-        reader = csv.reader(io.StringIO(raw), dialect)
-        rows = list(reader)
-        if self._max_rows is not None:
-            rows = rows[: self._max_rows + 1]  # +1 for header
-
-        lines = ["\t".join(row) for row in rows]
+        rows = self._parse_csv_text(raw)
         return Document(
-            content="\n".join(lines),
+            content="\n".join("\t".join(row) for row in rows),
             source=str(path.resolve()),
             metadata={
                 "extension": path.suffix.lower(),
@@ -89,16 +104,81 @@ class SpreadsheetReader(BaseReader):
         )
 
     # ------------------------------------------------------------------
-    # XLSX
+    # CSV — bytes
     # ------------------------------------------------------------------
 
-    def _read_xlsx(self, path: Path) -> Document:
+    def _read_csv_bytes(self, data: bytes, source_label: str) -> Document:
+        try:
+            raw = data.decode("utf-8")
+        except UnicodeDecodeError:
+            raw = data.decode("latin-1")
+
+        rows = self._parse_csv_text(raw)
+        return Document(
+            content="\n".join("\t".join(row) for row in rows),
+            source=source_label,
+            metadata={
+                "size_bytes": len(data),
+                "row_count": len(rows),
+                "col_count": max((len(r) for r in rows), default=0),
+            },
+        )
+
+    def _parse_csv_text(self, raw: str) -> list[list[str]]:
+        dialect = csv.Sniffer().sniff(raw[:4096], delimiters=",\t;|")
+        reader = csv.reader(io.StringIO(raw), dialect)
+        rows = list(reader)
+        if self._max_rows is not None:
+            rows = rows[: self._max_rows + 1]  # +1 for header
+        return rows
+
+    # ------------------------------------------------------------------
+    # XLSX — path
+    # ------------------------------------------------------------------
+
+    def _read_xlsx_path(self, path: Path) -> Document:
         openpyxl = _require_openpyxl()
         wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+        sheet_names = list(wb.sheetnames)
+        sections, total_rows = self._parse_xlsx_workbook(wb)
+        wb.close()
+        return Document(
+            content="\n\n".join(sections),
+            source=str(path.resolve()),
+            metadata={
+                "extension": path.suffix.lower(),
+                "filename": path.name,
+                "size_bytes": path.stat().st_size,
+                "sheet_count": len(sheet_names),
+                "total_rows": total_rows,
+            },
+        )
 
+    # ------------------------------------------------------------------
+    # XLSX — bytes
+    # ------------------------------------------------------------------
+
+    def _read_xlsx_bytes(self, data: bytes, source_label: str) -> Document:
+        openpyxl = _require_openpyxl()
+        wb = openpyxl.load_workbook(
+            io.BytesIO(data), read_only=True, data_only=True
+        )
+        sheet_names = list(wb.sheetnames)
+        sections, total_rows = self._parse_xlsx_workbook(wb)
+        wb.close()
+        return Document(
+            content="\n\n".join(sections),
+            source=source_label,
+            metadata={
+                "size_bytes": len(data),
+                "sheet_count": len(sheet_names),
+                "total_rows": total_rows,
+            },
+        )
+
+    def _parse_xlsx_workbook(self, wb: Any) -> tuple[list[str], int]:
         sections: list[str] = []
         total_rows = 0
-
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             rows_text: list[str] = []
@@ -110,16 +190,4 @@ class SpreadsheetReader(BaseReader):
                 total_rows += 1
             if rows_text:
                 sections.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows_text))
-
-        wb.close()
-        return Document(
-            content="\n\n".join(sections),
-            source=str(path.resolve()),
-            metadata={
-                "extension": path.suffix.lower(),
-                "filename": path.name,
-                "size_bytes": path.stat().st_size,
-                "sheet_count": len(wb.sheetnames),
-                "total_rows": total_rows,
-            },
-        )
+        return sections, total_rows

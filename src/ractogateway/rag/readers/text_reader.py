@@ -13,6 +13,9 @@ class TextReader(BaseReader):
 
     No external dependencies required.
 
+    Accepts a file path (``str`` / ``Path``), raw ``bytes``, or any binary
+    file-like object with a ``.read()`` method.
+
     Parameters
     ----------
     encoding:
@@ -43,7 +46,7 @@ class TextReader(BaseReader):
             }
         )
 
-    def read(self, path: Path) -> Document:
+    def _read_path(self, path: Path) -> Document:
         try:
             content = path.read_text(encoding=self._encoding)
         except UnicodeDecodeError:
@@ -57,4 +60,16 @@ class TextReader(BaseReader):
                 "filename": path.name,
                 "size_bytes": path.stat().st_size,
             },
+        )
+
+    def _read_bytes(self, data: bytes, *, source_label: str = "<bytes>") -> Document:
+        try:
+            content = data.decode(self._encoding)
+        except UnicodeDecodeError:
+            content = data.decode("latin-1")
+
+        return Document(
+            content=content,
+            source=source_label,
+            metadata={"size_bytes": len(data)},
         )

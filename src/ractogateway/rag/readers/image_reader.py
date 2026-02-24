@@ -10,6 +10,7 @@ Install with:  pip install ractogateway[rag-image]
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,9 @@ class ImageReader(BaseReader):
     LLM separately using :class:`~ractogateway.prompts.engine.RactoFile` for
     actual visual understanding.
 
+    Accepts a file path (``str`` / ``Path``), raw ``bytes``, or any binary
+    file-like object with a ``.read()`` method.
+
     Parameters
     ----------
     include_exif:
@@ -75,29 +79,11 @@ class ImageReader(BaseReader):
             }
         )
 
-    def read(self, path: Path) -> Document:
+    def _read_path(self, path: Path) -> Document:
         image_module = _require_pillow()
-
         with image_module.open(str(path)) as img:
-            width, height = img.size
-            mode = img.mode
-            fmt = img.format or path.suffix.upper().lstrip(".")
+            content, meta = self._extract_image_info(img, name=path.name)
 
-            lines: list[str] = [
-                f"Image: {path.name}",
-                f"Format: {fmt}",
-                f"Size: {width}x{height} pixels",
-                f"Color mode: {mode}",
-            ]
-
-            if self._include_exif:
-                exif_data = self._extract_exif(img)
-                if exif_data:
-                    lines.append("EXIF metadata:")
-                    for key, val in exif_data.items():
-                        lines.append(f"  {key}: {val}")
-
-        content = "\n".join(lines)
         return Document(
             content=content,
             source=str(path.resolve()),
@@ -105,12 +91,47 @@ class ImageReader(BaseReader):
                 "extension": path.suffix.lower(),
                 "filename": path.name,
                 "size_bytes": path.stat().st_size,
-                "width": width,
-                "height": height,
-                "format": fmt,
-                "mode": mode,
+                **meta,
             },
         )
+
+    def _read_bytes(self, data: bytes, *, source_label: str = "<bytes>") -> Document:
+        image_module = _require_pillow()
+        with image_module.open(io.BytesIO(data)) as img:
+            content, meta = self._extract_image_info(img, name=source_label)
+
+        return Document(
+            content=content,
+            source=source_label,
+            metadata={"size_bytes": len(data), **meta},
+        )
+
+    def _extract_image_info(self, img: Any, *, name: str) -> tuple[str, dict[str, Any]]:
+        width, height = img.size
+        mode = img.mode
+        fmt = img.format or "UNKNOWN"
+
+        lines: list[str] = [
+            f"Image: {name}",
+            f"Format: {fmt}",
+            f"Size: {width}x{height} pixels",
+            f"Color mode: {mode}",
+        ]
+
+        if self._include_exif:
+            exif_data = self._extract_exif(img)
+            if exif_data:
+                lines.append("EXIF metadata:")
+                for key, val in exif_data.items():
+                    lines.append(f"  {key}: {val}")
+
+        meta: dict[str, Any] = {
+            "width": width,
+            "height": height,
+            "format": fmt,
+            "mode": mode,
+        }
+        return "\n".join(lines), meta
 
     def _extract_exif(self, img: Any) -> dict[str, str]:
         tags = _load_exif_tags()

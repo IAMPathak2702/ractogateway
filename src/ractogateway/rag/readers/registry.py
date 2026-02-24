@@ -47,7 +47,7 @@ class FileReaderRegistry:
         for ext in reader.supported_extensions:
             self._map[ext.lower()] = reader
 
-    def get_reader(self, path: Path) -> BaseReader:
+    def get_reader(self, path: str | Path) -> BaseReader:
         """Return the reader for *path*'s extension.
 
         Raises
@@ -55,7 +55,7 @@ class FileReaderRegistry:
         ValueError
             If no reader supports the file's extension.
         """
-        ext = path.suffix.lower()
+        ext = Path(path).suffix.lower()
         reader = self._map.get(ext)
         if reader is None:
             supported = sorted(self._map.keys())
