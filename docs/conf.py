@@ -23,8 +23,8 @@ sys.path.insert(0, str(SRC_DIR))
 project = "RactoGateway"
 author = "Ved Prakash Pathak"
 copyright = "2026, Ved Prakash Pathak"
-version = "0.1.3"
-release = "0.1.3"
+version = "0.1.4"
+release = "0.1.4"
 
 # -- General configuration -----------------------------------------------------
 extensions = [

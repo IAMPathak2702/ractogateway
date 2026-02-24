@@ -32,7 +32,7 @@ from ractogateway._validation import (
     validate_stream_final,
     with_inferred_response_model,
 )
-from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult
+from ractogateway.adapters.base import ChatTurn, FinishReason, LLMResponse, ToolCallResult
 from ractogateway.adapters.openai_kit import OpenAILLMKit
 from ractogateway.exceptions import RactoGatewayError, _wrap_provider_error
 from ractogateway.prompts.engine import RactoPrompt
@@ -234,8 +234,8 @@ class OpenAIDeveloperKit:
         # API call
         adapter = self._get_adapter(model)
         original_user_message = config.user_message
-        history_turns = (
-            [{"role": m.role, "content": m.content} for m in config.history]
+        history_turns: list[ChatTurn] | None = (
+            [ChatTurn(role=m.role.value, content=m.content) for m in config.history]
             if config.history
             else None
         )
@@ -325,8 +325,8 @@ class OpenAIDeveloperKit:
         # API call
         adapter = self._get_adapter(model)
         original_user_message = config.user_message
-        history_turns = (
-            [{"role": m.role, "content": m.content} for m in config.history]
+        history_turns: list[ChatTurn] | None = (
+            [ChatTurn(role=m.role.value, content=m.content) for m in config.history]
             if config.history
             else None
         )
@@ -410,8 +410,8 @@ class OpenAIDeveloperKit:
         validation_config = with_inferred_response_model(config, prompt)
         adapter = self._get_adapter(model)
         client = self._sync_client()
-        history_turns = (
-            [{"role": m.role, "content": m.content} for m in config.history]
+        history_turns: list[ChatTurn] | None = (
+            [ChatTurn(role=m.role.value, content=m.content) for m in config.history]
             if config.history
             else None
         )
@@ -458,8 +458,8 @@ class OpenAIDeveloperKit:
         validation_config = with_inferred_response_model(config, prompt)
         adapter = self._get_adapter(model)
         client = self._async_client()
-        history_turns = (
-            [{"role": m.role, "content": m.content} for m in config.history]
+        history_turns: list[ChatTurn] | None = (
+            [ChatTurn(role=m.role.value, content=m.content) for m in config.history]
             if config.history
             else None
         )

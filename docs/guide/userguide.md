@@ -675,7 +675,7 @@ except ResponseModelValidationError as e:
 
 **Expected output (values will vary slightly with the model):**
 
-```json
+```text
 ======== PARSED STRUCTURED OUTPUT ========
 {
   'vendor_name': 'NeuroStack AI',
@@ -900,7 +900,7 @@ asyncio.run(main())
 Tool calling lets the LLM trigger your Python functions. Useful for live data,
 calculators, search, and business actions.
 
-### Step 1 ? Define tools and register them
+### Step 1 — Define tools and register them
 
 ```python
 from ractogateway.tools.registry import tool, ToolRegistry
@@ -910,7 +910,7 @@ registry = ToolRegistry()
 @tool(registry)
 def get_weather(city: str, unit: str = "celsius") -> str:
     """Get the current weather for a city."""
-    return f"The weather in {city} is 22?{'C' if unit == 'celsius' else 'F'} and sunny."
+    return f"The weather in {city} is 22°{'C' if unit == 'celsius' else 'F'} and sunny."
 
 @tool(registry)
 def get_time(timezone: str) -> str:
@@ -934,7 +934,7 @@ def calculate(expression: str) -> float:
 registry.register(calculate)
 ```
 
-### Step 2 ? One-call final answer (recommended)
+### Step 2 — One-call final answer (recommended)
 
 Set `auto_execute_tools=True` to keep `response.content` behavior consistent with
 non-tool requests.
@@ -965,7 +965,7 @@ response = kit.chat(config)
 print(response.content)  # Final integrated answer
 ```
 
-### Step 3 ? Manual tool loop (advanced)
+### Step 3 — Manual tool loop (advanced)
 
 If you prefer full control, keep `auto_execute_tools=False` (default) and execute
 `response.tool_calls` yourself.
@@ -1615,16 +1615,16 @@ response = kit.chat(gpt.ChatConfig(user_message="Hello", prompt=my_prompt))
 ### Mistake 5: Expecting typed validation but not setting it explicitly
 
 ```python
-# BEST PRACTICE ? set response_model explicitly
+# BEST PRACTICE — set response_model explicitly
 prompt = RactoPrompt(..., output_format=WeatherReport)
 config = gpt.ChatConfig(
     user_message="...",
-    response_model=WeatherReport,   # ? explicit validation contract
+    response_model=WeatherReport,   # ✅ explicit validation contract
 )
 
-# ALSO SUPPORTED ? inferred automatically from output_format model
+# ALSO SUPPORTED — inferred automatically from output_format model
 prompt = RactoPrompt(..., output_format=WeatherReport)
-config = gpt.ChatConfig(user_message="...")  # ? inferred from prompt.output_format
+config = gpt.ChatConfig(user_message="...")  # ✅ inferred from prompt.output_format
 ```
 
 ### Mistake 6: Missing `await` on async methods

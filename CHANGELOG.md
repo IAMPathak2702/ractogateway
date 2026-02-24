@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.4] — 2026-02-24
+
+### Fixed
+
+- **mypy strict** — `history_turns` in all three developer kits (`OpenAIDeveloperKit`,
+  `GoogleDeveloperKit`, `AnthropicDeveloperKit`) now correctly typed as
+  `list[ChatTurn] | None` instead of `list[dict[str, str]] | None`, eliminating
+  18 `[arg-type]` errors. `m.role.value` is used in place of `m.role` so the
+  string literal matches `ChatTurn.role: Literal["system","user","assistant"]`.
+- Removed stale `# type: ignore[return-value]` comment from `adapters/base.py`
+  that mypy flagged as `[unused-ignore]`.
+- Removed redundant `# noqa: PLC0415` from `adapters/google_kit.py` (rule
+  already globally suppressed in `pyproject.toml`).
+
+### Changed
+
+- Version bumped from `0.1.3` to `0.1.4` in `pyproject.toml`, `__init__.py`,
+  `docs/conf.py`, and `README.md` badge.
+- User guide (`docs/guide/userguide.md`) encoding artifacts corrected:
+  em-dashes (`—`) and degree symbol (`°`) in the Tool Calling section restored
+  from corrupted `?` characters; output code block re-labelled `text` instead
+  of `json` to fix Sphinx highlighting warning.
+
+---
+
 ## [0.1.3] — 2026-02-22
 
 ### Added
@@ -96,5 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.1.4]: https://github.com/IAMPathak2702/RactoGateway/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/IAMPathak2702/RactoGateway/compare/v0.1.1...v0.1.3
 [0.1.1]: https://github.com/IAMPathak2702/RactoGateway/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/IAMPathak2702/RactoGateway/releases/tag/v0.1.0

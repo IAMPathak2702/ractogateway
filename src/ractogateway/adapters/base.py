@@ -110,7 +110,7 @@ def try_parse_json(text: str) -> dict[str, Any] | list[Any] | None:
     except (json.JSONDecodeError, TypeError):
         return None
     if isinstance(result, (dict, list)):
-        return result  # type: ignore[return-value]
+        return result
     return None
 
 

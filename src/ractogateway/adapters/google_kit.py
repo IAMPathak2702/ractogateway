@@ -40,7 +40,7 @@ def build_google_contents(
 
     Gemini uses ``"model"`` where OpenAI/Anthropic use ``"assistant"``.
     """
-    from google.genai import types  # noqa: PLC0415
+    from google.genai import types
 
     if not history:
         return user_message
