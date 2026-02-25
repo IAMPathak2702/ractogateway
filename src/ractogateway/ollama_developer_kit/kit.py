@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 
 def _require_ollama() -> Any:
     try:
-        import ollama  # type: ignore[import-untyped]
+        import ollama
     except ImportError as exc:
         raise ImportError(
             "The 'ollama' package is required for OllamaDeveloperKit. "

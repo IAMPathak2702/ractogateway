@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 
 def _require_huggingface_hub() -> Any:
     try:
-        import huggingface_hub  # type: ignore[import-untyped]
+        import huggingface_hub
     except ImportError as exc:
         raise ImportError(
             "The 'huggingface_hub' package is required for HuggingFaceDeveloperKit. "
@@ -988,7 +988,7 @@ def _normalise_hf_embedding(
     """
     # Normalise numpy arrays if present
     try:
-        import numpy as np  # type: ignore[import-untyped]
+        import numpy as np
 
         if isinstance(raw, np.ndarray):
             raw = raw.tolist()

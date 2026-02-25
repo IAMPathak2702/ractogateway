@@ -27,7 +27,12 @@
     - 15.2 Semantic Cache
     - 15.3 Token Truncation
     - 15.4 Cost-Aware Routing
-16. [Google & Anthropic Kits](#16-google--anthropic-kits)
+16. [All Five Developer Kits](#16-all-five-developer-kits)
+    - 16.1 OpenAIDeveloperKit (GPT)
+    - 16.2 GoogleDeveloperKit (Gemini)
+    - 16.3 AnthropicDeveloperKit (Claude)
+    - 16.4 OllamaDeveloperKit (Local / Offline)
+    - 16.5 HuggingFaceDeveloperKit (HF Inference API / TGI / vLLM)
 17. [RAG — Retrieval-Augmented Generation](#17-rag--retrieval-augmented-generation)
 18. [Redis — Production Infrastructure](#18-redis--production-infrastructure)
 19. [Common Mistakes & How to Fix Them](#19-common-mistakes--how-to-fix-them)
@@ -262,7 +267,10 @@ prompt = RactoPrompt(
 
 ## 6. Developer Kits
 
-A **Developer Kit** is your interface to a specific LLM provider. All three kits (`OpenAIDeveloperKit`, `GoogleDeveloperKit`, `AnthropicDeveloperKit`) share the same method names.
+A **Developer Kit** is your interface to a specific LLM provider.
+All five kits (`OpenAIDeveloperKit`, `GoogleDeveloperKit`,
+`AnthropicDeveloperKit`, `OllamaDeveloperKit`, `HuggingFaceDeveloperKit`)
+share the same six method names.
 
 ### OpenAIDeveloperKit — Full Parameter Reference
 
@@ -1297,11 +1305,46 @@ kit = gpt.OpenAIDeveloperKit(
 
 ---
 
-## 16. Google & Anthropic Kits
+## 16. All Five Developer Kits
 
-The exact same patterns work with Google and Anthropic — just import the right kit.
+All five kits share identical method signatures:
+`chat()`, `achat()`, `stream()`, `astream()`, `embed()`, `aembed()`.
+Swap the import alias and kit name — everything else stays the same.
 
-### GoogleDeveloperKit (Gemini)
+| Kit | Alias | Env var | Offline? |
+| --- | --- | --- | --- |
+| `OpenAIDeveloperKit` | `gpt` | `OPENAI_API_KEY` | No |
+| `GoogleDeveloperKit` | `gemini` | `GOOGLE_API_KEY` | No |
+| `AnthropicDeveloperKit` | `claude` | `ANTHROPIC_API_KEY` | No |
+| `OllamaDeveloperKit` | `local` | — | **Yes** |
+| `HuggingFaceDeveloperKit` | `hf` | `HF_TOKEN` (optional) | Optional |
+
+### 16.1 OpenAIDeveloperKit (GPT)
+
+The primary examples throughout this guide use `OpenAIDeveloperKit`.
+A quick recap:
+
+```python
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
+
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer the user clearly.",
+    constraints=["Be concise."],
+    tone="Friendly",
+    output_format="text",
+)
+
+kit = gpt.OpenAIDeveloperKit(model="gpt-4o-mini", default_prompt=prompt)
+response = kit.chat(gpt.ChatConfig(user_message="What is 2 + 2?"))
+print(response.content)  # "4"
+```
+
+Install: `pip install ractogateway[openai]`  ·  Key env var: `OPENAI_API_KEY`
+
+---
+
+### 16.2 GoogleDeveloperKit (Gemini)
 
 ```python
 from ractogateway import google_developer_kit as gemini
@@ -1330,21 +1373,25 @@ print(response.content)
 # Mud sings after rain.
 ```
 
-### AnthropicDeveloperKit (Claude)
+### 16.3 AnthropicDeveloperKit (Claude)
 
 ```python
 from ractogateway import anthropic_developer_kit as claude
 from ractogateway.prompts.engine import RactoPrompt
 
 kit = claude.AnthropicDeveloperKit(
-    model="claude-sonnet-4-6",   # or "claude-opus-4-6", "claude-haiku-4-5-20251001"
-    api_key="sk-ant-...",        # or set ANTHROPIC_API_KEY env var
+    model="claude-sonnet-4-6",
+    # or "claude-opus-4-6", "claude-haiku-4-5-20251001"
+    api_key="sk-ant-...",  # or set ANTHROPIC_API_KEY env var
 )
 
 prompt = RactoPrompt(
     role="You are an expert code reviewer.",
     aim="Review the code snippet and identify any bugs or improvements.",
-    constraints=["Be specific — cite line numbers.", "Prioritise correctness over style."],
+    constraints=[
+        "Be specific — cite line numbers.",
+        "Prioritise correctness over style.",
+    ],
     tone="Technical and direct.",
     output_format="markdown",
 )
@@ -1356,7 +1403,131 @@ response = kit.chat(claude.ChatConfig(
 print(response.content)
 ```
 
-**All three kits share the same methods:** `chat()`, `achat()`, `stream()`, `astream()`, `embed()`, `aembed()`.
+Install: `pip install ractogateway[anthropic]`  ·  Key env var: `ANTHROPIC_API_KEY`
+
+> **Note:** Anthropic does not provide a native embeddings API.
+> Call `embed()` / `aembed()` via `OpenAIDeveloperKit` or `GoogleDeveloperKit`
+> instead when you need vectors alongside Claude chat.
+
+---
+
+### 16.4 OllamaDeveloperKit (Local / Offline)
+
+Run any open-source model on your own hardware — no API key, no data leaving
+your machine.
+
+**Prerequisites:**
+
+```bash
+# 1. Install Ollama  →  https://ollama.com/download
+# 2. Pull a model
+ollama pull llama3.2          # 2 GB general-purpose
+ollama pull nomic-embed-text  # 274 MB embeddings model
+# 3. Install the Python extra
+pip install ractogateway[ollama]
+```
+
+```python
+from ractogateway import ollama_developer_kit as local, RactoPrompt
+
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer questions concisely.",
+    constraints=["Do not hallucinate."],
+    tone="Friendly",
+    output_format="text",
+)
+
+# Ollama listens at http://localhost:11434 by default — no key needed
+kit = local.Chat(model="llama3.2", default_prompt=prompt)
+
+response = kit.chat(local.ChatConfig(user_message="What is a neural network?"))
+print(response.content)
+```
+
+**Streaming:**
+
+```python
+for chunk in kit.stream(local.ChatConfig(user_message="Tell me a joke.")):
+    print(chunk.delta.text, end="", flush=True)
+```
+
+**Embeddings** (requires a dedicated embedding model):
+
+```python
+resp = kit.embed(local.EmbeddingConfig(texts=["hello", "world"]))
+print(resp.vectors[0].embedding[:5])
+```
+
+**Embedded server management** — start Ollama programmatically:
+
+```python
+with local.OllamaServerManager(port=11500) as srv:
+    kit = local.Chat(model="llama3.2", base_url=srv.base_url)
+    print(kit.chat(local.ChatConfig(user_message="Hello!")).content)
+# server stops automatically
+```
+
+See the full guide: {doc}`ollama`
+
+---
+
+### 16.5 HuggingFaceDeveloperKit (HF Inference API / TGI / vLLM)
+
+Three deployment modes through one interface:
+
+| Mode | When to use |
+| --- | --- |
+| HF Inference API (cloud) | Quick prototyping; set `HF_TOKEN` |
+| Local TGI | Self-hosted Text Generation Inference |
+| Local vLLM / Llama.cpp | Any OpenAI-compatible HTTP server |
+
+```bash
+pip install ractogateway[huggingface]
+export HF_TOKEN="hf_..."   # obtain at https://huggingface.co/settings/tokens
+```
+
+**Cloud inference:**
+
+```python
+from ractogateway import huggingface_developer_kit as hf, RactoPrompt
+
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer the user clearly.",
+    constraints=["Stay on topic."],
+    tone="Friendly",
+    output_format="text",
+)
+
+kit = hf.Chat(
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    default_prompt=prompt,
+)
+response = kit.chat(hf.ChatConfig(user_message="Explain transformers briefly."))
+print(response.content)
+```
+
+**Local TGI server** (no API key):
+
+```python
+kit = hf.Chat(
+    model="tgi",
+    base_url="http://localhost:8080",
+    default_prompt=prompt,
+)
+```
+
+**Embeddings:**
+
+```python
+resp = kit.embed(
+    hf.EmbeddingConfig(texts=["hello world", "goodbye world"])
+)
+print(f"dim={len(resp.vectors[0].embedding)}")
+```
+
+See the full guide: {doc}`huggingface`
 
 ---
 

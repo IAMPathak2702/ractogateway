@@ -35,7 +35,7 @@ from ractogateway.telemetry._pricing import DEFAULT_COST_TABLE
 
 def _require_otel_sdk() -> Any:
     try:
-        from opentelemetry.sdk.trace import TracerProvider  # type: ignore[import-untyped]
+        from opentelemetry.sdk.trace import TracerProvider
     except ImportError as exc:
         raise ImportError(
             "OpenTelemetry SDK is required for RactoTracer. "
@@ -46,7 +46,7 @@ def _require_otel_sdk() -> Any:
 
 def _require_otlp_grpc() -> Any:
     try:
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # type: ignore[import-untyped]
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
             OTLPSpanExporter,
         )
     except ImportError as exc:
@@ -59,7 +59,7 @@ def _require_otlp_grpc() -> Any:
 
 def _require_otlp_http() -> Any:
     try:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # type: ignore[import-untyped]
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
             OTLPSpanExporter,
         )
     except ImportError as exc:
@@ -175,12 +175,12 @@ class RactoTracer:
 
     def _build_otel_tracer(self) -> Any:
         """Construct and configure an OpenTelemetry ``TracerProvider``."""
-        from opentelemetry.sdk.resources import (  # type: ignore[import-untyped]
+        from opentelemetry.sdk.resources import (
             SERVICE_NAME,
             Resource,
         )
-        from opentelemetry.sdk.trace import TracerProvider  # type: ignore[import-untyped]
-        from opentelemetry.sdk.trace.export import (  # type: ignore[import-untyped]
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import (
             BatchSpanProcessor,
             ConsoleSpanExporter,
         )
@@ -189,15 +189,15 @@ class RactoTracer:
         provider = TracerProvider(resource=resource)
 
         if self._otlp_endpoint:
-            OTLPGrpc = _require_otlp_grpc()
+            otlp_grpc_cls = _require_otlp_grpc()
             provider.add_span_processor(
-                BatchSpanProcessor(OTLPGrpc(endpoint=self._otlp_endpoint))
+                BatchSpanProcessor(otlp_grpc_cls(endpoint=self._otlp_endpoint))
             )
 
         if self._otlp_http_endpoint:
-            OTLPHttp = _require_otlp_http()
+            otlp_http_cls = _require_otlp_http()
             provider.add_span_processor(
-                BatchSpanProcessor(OTLPHttp(endpoint=self._otlp_http_endpoint))
+                BatchSpanProcessor(otlp_http_cls(endpoint=self._otlp_http_endpoint))
             )
 
         if self._console:
@@ -238,7 +238,7 @@ class RactoTracer:
     ) -> None:
         if self._otel_tracer is None:
             return
-        from opentelemetry.trace import StatusCode  # type: ignore[import-untyped]
+        from opentelemetry.trace import StatusCode
 
         with self._otel_tracer.start_as_current_span(name) as span:
             span.set_attribute("llm.provider", provider)

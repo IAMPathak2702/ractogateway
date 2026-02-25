@@ -109,7 +109,7 @@ class OllamaServerManager:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def start(self) -> "OllamaServerManager":
+    def start(self) -> OllamaServerManager:
         """Start the Ollama server subprocess.
 
         Returns *self* so that the call can be chained::
@@ -210,7 +210,7 @@ class OllamaServerManager:
     # Context-manager protocol
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "OllamaServerManager":
+    def __enter__(self) -> OllamaServerManager:
         self.start()
         return self
 

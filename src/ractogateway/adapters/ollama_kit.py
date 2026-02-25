@@ -30,7 +30,7 @@ from ractogateway.tools.registry import ToolRegistry
 def _require_ollama() -> Any:
     """Lazily import ollama — raises a friendly error if not installed."""
     try:
-        import ollama  # type: ignore[import-untyped]
+        import ollama
     except ImportError as exc:
         raise ImportError(
             "The 'ollama' package is required for OllamaLLMKit. "

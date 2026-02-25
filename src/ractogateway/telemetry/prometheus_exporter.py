@@ -24,7 +24,7 @@ from typing import Any
 
 def _require_prometheus() -> Any:
     try:
-        import prometheus_client  # type: ignore[import-untyped]
+        import prometheus_client
     except ImportError as exc:
         raise ImportError(
             "prometheus_client is required for PrometheusExporter. "

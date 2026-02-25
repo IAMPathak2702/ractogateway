@@ -30,7 +30,7 @@ from ractogateway.tools.registry import ToolRegistry
 def _require_huggingface_hub() -> Any:
     """Lazily import huggingface_hub — raises a friendly error if not installed."""
     try:
-        import huggingface_hub  # type: ignore[import-untyped]
+        import huggingface_hub
     except ImportError as exc:
         raise ImportError(
             "The 'huggingface_hub' package is required for HuggingFaceLLMKit. "

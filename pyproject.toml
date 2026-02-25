@@ -269,7 +269,10 @@ known-first-party = ["ractogateway"]
 "tests/**/*.py" = ["S101", "PLR2004"]
 "src/ractogateway/prompts/engine.py" = ["E501"]               # guardrail strings intentionally verbose
 "src/ractogateway/tools/registry.py" = ["PLR2004"]            # magic length constant is self-documenting
-"src/ractogateway/anthropic_developer_kit/kit.py" = ["PLR0911"] # streaming state machine needs >6 return paths
+# Middleware pipeline in each kit: cache + routing + tracing logic exceeds pylint branch/statement limits by design
+"src/ractogateway/anthropic_developer_kit/kit.py" = ["PLR0911", "PLR0912", "PLR0915"]
+"src/ractogateway/google_developer_kit/kit.py" = ["PLR0912", "PLR0915"]
+"src/ractogateway/openai_developer_kit/kit.py" = ["PLR0912", "PLR0915"]
 "src/ractogateway/rag/stores/faiss_store.py" = ["S301", "S403"] # pickle used for local persistence
 "src/ractogateway/rag/stores/pgvector_store.py" = ["S608"]    # SQL string formatting is parameterised
 "src/ractogateway/rag/chunkers/recursive_chunker.py" = ["PLR0912"] # chunking algorithm needs branching
@@ -277,8 +280,9 @@ known-first-party = ["ractogateway"]
 "src/ractogateway/batch/openai_batch.py" = ["S603", "PLR0912", "E501"]
 "src/ractogateway/batch/anthropic_batch.py" = ["PLR0911", "PLR0912"]
 # Local-model kits: streaming state machines have >6 return paths; lazy imports
-"src/ractogateway/ollama_developer_kit/kit.py" = ["PLR0911", "PLR0912"]
-"src/ractogateway/huggingface_developer_kit/kit.py" = ["PLR0911", "PLR0912"]
+"src/ractogateway/ollama_developer_kit/kit.py" = ["PLR0911", "PLR0912", "PLR0915"]
+"src/ractogateway/ollama_developer_kit/server.py" = ["S603"]  # subprocess calls are intentional (managed ollama binary)
+"src/ractogateway/huggingface_developer_kit/kit.py" = ["PLR0911", "PLR0912", "PLR0915"]
 "src/ractogateway/adapters/ollama_kit.py" = ["PLC0415"]
 "src/ractogateway/adapters/huggingface_kit.py" = ["PLC0415"]
 # Redis: 5-param signatures mirror ExactMatchCache; SCAN-based clear is intentional
@@ -290,6 +294,8 @@ known-first-party = ["ractogateway"]
 "src/ractogateway/mcp/multi_client.py" = ["PLR0912"]
 "src/ractogateway/mcp/client.py" = ["SLF001"]
 "src/ractogateway/mcp/server.py" = ["SLF001"]
+# Telemetry: S106 false-positive on "token_type" label arg; N806 handled by renaming
+"src/ractogateway/telemetry/metrics.py" = ["S106"]
 
 [tool.mypy]
 python_version = "3.10"

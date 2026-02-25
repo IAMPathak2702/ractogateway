@@ -44,7 +44,7 @@ from ractogateway.telemetry._pricing import DEFAULT_COST_TABLE
 
 def _require_prometheus() -> Any:
     try:
-        import prometheus_client  # type: ignore[import-untyped]
+        import prometheus_client
     except ImportError as exc:
         raise ImportError(
             "prometheus_client is required for GatewayMetricsMiddleware. "
