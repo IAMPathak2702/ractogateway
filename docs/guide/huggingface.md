@@ -141,6 +141,40 @@ for vec in resp.vectors:
     print(f"[{vec.index}] '{vec.text}' — dim={len(vec.embedding)}")
 ```
 
+## Vision Models (Image Input)
+
+HuggingFace models that support the OpenAI-compatible ``image_url`` content
+block format (e.g. ``llava-hf/llava-1.5-7b-hf``,
+``Qwen/Qwen2-VL-7B-Instruct``) accept image attachments via
+``ChatConfig.attachments``:
+
+```python
+from ractogateway.prompts.engine import RactoFile
+
+img = RactoFile.from_path("/tmp/chart.png")
+
+kit = hf.Chat(
+    model="llava-hf/llava-1.5-7b-hf",
+    default_prompt=prompt,
+)
+response = kit.chat(
+    hf.ChatConfig(
+        user_message="What trend do you see in this chart?",
+        attachments=[img],
+    )
+)
+print(response.content)
+```
+
+For local TGI deployments, enable multimodal support when launching the
+container:
+
+```bash
+docker run --rm -p 8080:80 \
+  ghcr.io/huggingface/text-generation-inference \
+  --model-id llava-hf/llava-1.5-7b-hf
+```
+
 ## Tool Calling
 
 Tool calling works on any model that supports function calling through the

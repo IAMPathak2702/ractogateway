@@ -207,6 +207,9 @@ class AnthropicLLMKit(BaseLLMAdapter):
         **kwargs: Any,
     ) -> dict[str, Any]:
         system_prompt = prompt.compile()
+        _atts = list(kwargs.pop("attachments", None) or [])
+        _tmp = prompt.to_messages(user_message, attachments=_atts, provider="anthropic")
+        user_content: Any = _tmp[1]["content"]
         history_msgs = (
             [{"role": t["role"], "content": t["content"]} for t in history]
             if history
@@ -215,7 +218,7 @@ class AnthropicLLMKit(BaseLLMAdapter):
         request: dict[str, Any] = {
             "model": self.model,
             "system": system_prompt,
-            "messages": [*history_msgs, {"role": "user", "content": user_message}],
+            "messages": [*history_msgs, {"role": "user", "content": user_content}],
             "temperature": temperature,
             "max_tokens": max_tokens,
         }

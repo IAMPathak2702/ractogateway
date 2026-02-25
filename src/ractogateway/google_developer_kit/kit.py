@@ -249,6 +249,7 @@ class GoogleDeveloperKit:
                 tools=config.tools,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
+                attachments=config.attachments,
                 **config.extra,
             )
             return validate_and_retry(
@@ -411,6 +412,7 @@ class GoogleDeveloperKit:
                 tools=config.tools,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
+                attachments=config.attachments,
                 **config.extra,
             )
             return await async_validate_and_retry(
@@ -541,7 +543,9 @@ class GoogleDeveloperKit:
             if config.history
             else None
         )
-        stream_contents = build_google_contents(history_turns, config.user_message)
+        stream_contents = build_google_contents(
+            history_turns, config.user_message, attachments=config.attachments
+        )
 
         accumulated = ""
         tool_calls: list[ToolCallResult] = []
@@ -658,7 +662,9 @@ class GoogleDeveloperKit:
             if config.history
             else None
         )
-        stream_contents = build_google_contents(history_turns, config.user_message)
+        stream_contents = build_google_contents(
+            history_turns, config.user_message, attachments=config.attachments
+        )
 
         accumulated = ""
         tool_calls: list[ToolCallResult] = []

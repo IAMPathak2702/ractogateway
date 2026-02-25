@@ -181,7 +181,8 @@ class OllamaLLMKit(BaseLLMAdapter):
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Build the kwargs dict for ``client.chat(**request)``."""
-        messages = prompt.to_messages(user_message, provider="openai")
+        _atts = list(kwargs.pop("attachments", None) or [])
+        messages = prompt.to_messages(user_message, attachments=_atts, provider="ollama")
         if history:
             messages = [
                 messages[0],

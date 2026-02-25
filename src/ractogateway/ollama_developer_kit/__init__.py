@@ -20,6 +20,7 @@ from ractogateway.adapters.base import FinishReason, LLMResponse, ToolCallResult
 from ractogateway.cache.exact_cache import ExactMatchCache
 from ractogateway.cache.semantic_cache import SemanticCache
 from ractogateway.ollama_developer_kit.kit import OllamaDeveloperKit
+from ractogateway.ollama_developer_kit.server import OllamaServerManager
 from ractogateway.routing._models import RoutingTier
 from ractogateway.routing.router import CostAwareRouter
 from ractogateway.truncation._models import TruncationConfig
@@ -42,6 +43,7 @@ __all__ = [
     "Message",
     "MessageRole",
     "OllamaDeveloperKit",
+    "OllamaServerManager",
     "RoutingTier",
     "SemanticCache",
     "StreamChunk",

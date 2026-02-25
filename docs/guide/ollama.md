@@ -110,6 +110,38 @@ for vec in resp.vectors:
     print(f"[{vec.index}] '{vec.text}' — dim={len(vec.embedding)}")
 ```
 
+## Vision Models (Image Input)
+
+Ollama supports multimodal / vision models such as ``llava``, ``llava-llama3``,
+and ``minicpm-v``.  Pass image files via ``ChatConfig.attachments``:
+
+```python
+from ractogateway.prompts.engine import RactoFile
+
+# Load an image
+img = RactoFile.from_path("/tmp/photo.jpg")
+
+# Or from raw bytes
+img = RactoFile.from_bytes(open("photo.jpg", "rb").read(), "image/jpeg")
+
+kit = local.Chat(model="llava", default_prompt=prompt)
+response = kit.chat(
+    local.ChatConfig(
+        user_message="Describe what you see in this image.",
+        attachments=[img],
+    )
+)
+print(response.content)
+```
+
+Pull a vision model first:
+
+```bash
+ollama pull llava          # 4.5 GB — general vision model
+ollama pull llava-llama3   # 5 GB — Llama 3 backbone
+ollama pull minicpm-v      # 5.5 GB — strong at charts / documents
+```
+
 ## Tool Calling
 
 Ollama supports function calling on models that were trained with tool support
@@ -134,6 +166,65 @@ response = kit.chat(
 )
 print(response.content)
 ```
+
+## Embedded Server Management
+
+RactoGateway can start and stop Ollama for you so you don't need to run
+``ollama serve`` separately.  This is especially useful when:
+
+* You need a **custom port** (e.g. to avoid conflicts with an existing server).
+* You want **programmatic lifecycle control** inside tests or long-running
+  services.
+
+### How It Works
+
+``OllamaServerManager`` launches an ``ollama serve`` subprocess and configures
+it to listen on the port you choose via the ``OLLAMA_HOST`` environment
+variable.  It registers an ``atexit`` handler so the process is always cleaned
+up — even if your program crashes.
+
+### Context Manager (Recommended)
+
+```python
+from ractogateway import ollama_developer_kit as local
+
+with local.OllamaServerManager(port=11500) as srv:
+    # srv.base_url == "http://127.0.0.1:11500"
+    kit = local.Chat(model="llama3.2", base_url=srv.base_url)
+    response = kit.chat(local.ChatConfig(user_message="Hello!"))
+    print(response.content)
+# Server is automatically stopped here
+```
+
+### Manual Start / Stop
+
+```python
+srv = local.OllamaServerManager(port=11500)
+srv.start()   # blocks until the server is ready (default timeout: 30 s)
+
+kit = local.Chat(model="llama3.2", base_url=srv.base_url)
+print(kit.chat(local.ChatConfig(user_message="What is 2+2?")).content)
+
+srv.stop()    # graceful SIGTERM → SIGKILL if needed
+```
+
+### Pull Models Programmatically
+
+```python
+with local.OllamaServerManager(port=11500) as srv:
+    srv.pull("llama3.2")                # equivalent to: ollama pull llama3.2
+    print(srv.list_models())            # ['llama3.2:latest', ...]
+    kit = local.Chat(model="llama3.2", base_url=srv.base_url)
+```
+
+### Constructor Parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `host` | `str` | `"127.0.0.1"` | Bind address |
+| `port` | `int` | `11434` | TCP port for the REST API |
+| `startup_timeout` | `float` | `30.0` | Seconds to wait for readiness |
+| `ollama_bin` | `str` | `"ollama"` | Path to the Ollama binary |
 
 ## Pointing at a Remote Ollama Server
 

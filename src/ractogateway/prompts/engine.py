@@ -530,11 +530,12 @@ class RactoPrompt(BaseModel):
 
             Each file is re-encoded into the content-block schema expected
             by the target provider (``image_url`` for OpenAI, ``image`` /
-            ``document`` for Anthropic, ``inline_data`` for Google).
+            ``document`` for Anthropic, ``inline_data`` for Google,
+            ``images`` list for Ollama).
         provider:
-            One of ``"openai"``, ``"anthropic"``, ``"google"``, or
-            ``"generic"``.  Controls the system-role key name and the
-            content-block format used for attachments.
+            One of ``"openai"``, ``"anthropic"``, ``"google"``,
+            ``"ollama"``, or ``"generic"``.  Controls the system-role key
+            name and the content-block format used for attachments.
 
         Returns
         -------
@@ -570,9 +571,28 @@ class RactoPrompt(BaseModel):
                 {"role": "user", "content": _build_google_content(user_message, files)},
             ]
 
+        if provider == "ollama":
+            # Ollama vision models accept a top-level ``images`` list of
+            # raw base-64 strings alongside the text ``content`` field.
+            # Non-image attachments are appended as text in the content.
+            images: list[str] = [f.base64_data for f in files if f.is_image]
+            text_parts: list[str] = [
+                f.data.decode("utf-8", errors="replace") for f in files if f.is_text
+            ]
+            combined_content = user_message
+            if text_parts:
+                combined_content = "\n\n".join(text_parts) + "\n\n" + user_message
+            user_msg: dict[str, Any] = {"role": "user", "content": combined_content}
+            if images:
+                user_msg["images"] = images
+            return [
+                {"role": "system", "content": system_prompt},
+                user_msg,
+            ]
+
         raise ValueError(
             f"Unknown provider {provider!r}. "
-            f"Expected one of: 'openai', 'anthropic', 'google', 'generic'."
+            f"Expected one of: 'openai', 'anthropic', 'google', 'ollama', 'generic'."
         )
 
     def __str__(self) -> str:

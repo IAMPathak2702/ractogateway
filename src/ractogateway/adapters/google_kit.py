@@ -31,25 +31,40 @@ def _require_genai() -> Any:
 def build_google_contents(
     history: list[ChatTurn] | None,
     user_message: str,
+    attachments: list[Any] | None = None,
 ) -> Any:
     """Build a Gemini ``contents`` value that includes prior conversation turns.
 
-    When *history* is empty or ``None`` a plain string is returned (identical
-    to the single-turn behaviour).  With history a list of ``types.Content``
-    objects is returned so the model sees the full conversation context.
+    When *history* is empty or ``None`` and there are no *attachments* a plain
+    string is returned (identical to the single-turn behaviour).  With history
+    or image attachments a list of ``types.Content`` objects is returned so the
+    model sees the full conversation context.
 
     Gemini uses ``"model"`` where OpenAI/Anthropic use ``"assistant"``.
+    Image attachments are embedded as ``Part.from_bytes`` inline data parts.
     """
     from google.genai import types
 
-    if not history:
+    files = attachments or []
+    image_parts: list[Any] = [
+        types.Part.from_bytes(data=f.data, mime_type=f.mime_type)
+        for f in files
+        if f.is_image
+    ]
+
+    if not history and not image_parts:
         return user_message
+
+    user_parts: list[Any] = [types.Part(text=user_message), *image_parts]
+
+    if not history:
+        return [types.Content(role="user", parts=user_parts)]
 
     contents: list[Any] = []
     for turn in history:
         role = "model" if turn["role"] == "assistant" else turn["role"]
         contents.append(types.Content(role=role, parts=[types.Part(text=turn["content"])]))
-    contents.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
+    contents.append(types.Content(role="user", parts=user_parts))
     return contents
 
 
@@ -189,6 +204,7 @@ class GoogleLLMKit(BaseLLMAdapter):
         from google.genai import types
 
         client = self._make_client()
+        _atts = list(kwargs.pop("attachments", None) or [])
         gen_config = self._build_config(
             tools=tools,
             temperature=temperature,
@@ -196,7 +212,7 @@ class GoogleLLMKit(BaseLLMAdapter):
             **kwargs,
         )
         system_prompt = prompt.compile()
-        contents = build_google_contents(history, user_message)
+        contents = build_google_contents(history, user_message, attachments=_atts)
         try:
             response = client.models.generate_content(
                 model=self.model,
@@ -226,6 +242,7 @@ class GoogleLLMKit(BaseLLMAdapter):
         from google.genai import types
 
         client = self._make_client()
+        _atts = list(kwargs.pop("attachments", None) or [])
         gen_config = self._build_config(
             tools=tools,
             temperature=temperature,
@@ -233,7 +250,7 @@ class GoogleLLMKit(BaseLLMAdapter):
             **kwargs,
         )
         system_prompt = prompt.compile()
-        contents = build_google_contents(history, user_message)
+        contents = build_google_contents(history, user_message, attachments=_atts)
         try:
             response = await client.aio.models.generate_content(
                 model=self.model,

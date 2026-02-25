@@ -256,6 +256,7 @@ class AnthropicDeveloperKit:
                 tools=config.tools,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
+                attachments=config.attachments,
                 **config.extra,
             )
             return validate_and_retry(
@@ -418,6 +419,7 @@ class AnthropicDeveloperKit:
                 tools=config.tools,
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
+                attachments=config.attachments,
                 **config.extra,
             )
             return await async_validate_and_retry(
@@ -548,6 +550,7 @@ class AnthropicDeveloperKit:
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
+            attachments=config.attachments,
             **config.extra,
         )
 
@@ -666,6 +669,7 @@ class AnthropicDeveloperKit:
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
+            attachments=config.attachments,
             **config.extra,
         )
 

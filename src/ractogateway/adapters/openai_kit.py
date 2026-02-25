@@ -226,7 +226,8 @@ class OpenAILLMKit(BaseLLMAdapter):
         max_tokens: int = 4096,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        messages = prompt.to_messages(user_message, provider="openai")
+        _atts = list(kwargs.pop("attachments", None) or [])
+        messages = prompt.to_messages(user_message, attachments=_atts, provider="openai")
         if history:
             # Splice history turns between the system message and the current user message.
             messages = [

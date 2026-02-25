@@ -443,6 +443,31 @@ print(resp.vectors[0].embedding[:5])
 | `embedding_model` | `str` | `"nomic-embed-text"` | Default model for `embed()` calls |
 | `default_prompt` | `RactoPrompt \| None` | `None` | Auto-used when `ChatConfig.prompt` is `None` |
 
+**Embedded Server Management (`OllamaServerManager`):**
+
+Run Ollama on a custom port — or spin it up/down programmatically — without
+ever touching the terminal:
+
+```python
+with local.OllamaServerManager(port=11500) as srv:
+    # srv.base_url == "http://127.0.0.1:11500"
+    kit = local.Chat(model="llama3.2", base_url=srv.base_url)
+    print(kit.chat(local.ChatConfig(user_message="Hello!")).content)
+# server is stopped automatically
+```
+
+**Vision Models:**
+
+```python
+from ractogateway.prompts.engine import RactoFile
+
+img = RactoFile.from_path("/tmp/photo.jpg")
+kit = local.Chat(model="llava", default_prompt=prompt)   # ollama pull llava
+response = kit.chat(
+    local.ChatConfig(user_message="What's in this image?", attachments=[img])
+)
+```
+
 ---
 
 ### HuggingFace — Cloud Inference API + Local TGI / vLLM
