@@ -3,9 +3,9 @@
 **One Python package for all production-grade LLM solutions.**
 
 RactoGateway is a unified AI SDK that gives you a single, clean interface to OpenAI,
-Google Gemini, and Anthropic Claude — with built-in anti-hallucination prompting,
-strict Pydantic validation, streaming, tool calling, embeddings, fine-tuning, and a
-full RAG pipeline.
+Google Gemini, Anthropic Claude, Ollama (local), and HuggingFace — with built-in
+anti-hallucination prompting, strict Pydantic validation, streaming, tool calling,
+embeddings, fine-tuning, and a full RAG pipeline.
 
 ```{toctree}
 :maxdepth: 2
@@ -22,6 +22,8 @@ quickstart
 guide/userguide
 guide/prompt_engine
 guide/developer_kits
+guide/ollama
+guide/huggingface
 guide/streaming
 guide/tools
 guide/embeddings

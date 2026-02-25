@@ -22,4 +22,6 @@ __all__ = [
     #   from ractogateway.adapters.openai_kit import OpenAILLMKit
     #   from ractogateway.adapters.google_kit import GoogleLLMKit
     #   from ractogateway.adapters.anthropic_kit import AnthropicLLMKit
+    #   from ractogateway.adapters.ollama_kit import OllamaLLMKit
+    #   from ractogateway.adapters.huggingface_kit import HuggingFaceLLMKit
 ]

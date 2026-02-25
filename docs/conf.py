@@ -75,6 +75,9 @@ autodoc_mock_imports = [
     "kombu",
     # Kafka event streaming
     "kafka",
+    # Local-model inference providers
+    "ollama",
+    "huggingface_hub",
     # MCP (Model Context Protocol)
     "mcp",
     "starlette",

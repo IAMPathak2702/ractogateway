@@ -54,6 +54,15 @@ keywords = [
     "claude-desktop",
     "tool-server",
     "agentic",
+    "ollama",
+    "local-llm",
+    "huggingface",
+    "huggingface-hub",
+    "text-generation-inference",
+    "tgi",
+    "vllm",
+    "local-model",
+    "offline-inference",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -85,10 +94,15 @@ dependencies = [
 openai = ["openai>=1.0,<3.0"]
 google = ["google-genai>=1.0,<2.0"]
 anthropic = ["anthropic>=0.40,<1.0"]
+# Local / self-hosted model inference
+ollama = ["ollama>=0.3,<1.0"]
+huggingface = ["huggingface_hub>=0.23,<2.0"]
 all = [
     "ractogateway[openai]",
     "ractogateway[google]",
     "ractogateway[anthropic]",
+    "ractogateway[ollama]",
+    "ractogateway[huggingface]",
 ]
 
 # ── RAG file readers (each optional) ─────────────────────────────────────────
@@ -185,6 +199,9 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "pre-commit>=4.0",
+    # local-model extras for development
+    "ollama>=0.3,<1.0",
+    "huggingface_hub>=0.23,<2.0",
 ]
 docs = [
     "sphinx>=7.0",
@@ -259,6 +276,11 @@ known-first-party = ["ractogateway"]
 # Batch processors: JSON parsing in result loop, long line URLs in JSONL body
 "src/ractogateway/batch/openai_batch.py" = ["S603", "PLR0912", "E501"]
 "src/ractogateway/batch/anthropic_batch.py" = ["PLR0911", "PLR0912"]
+# Local-model kits: streaming state machines have >6 return paths; lazy imports
+"src/ractogateway/ollama_developer_kit/kit.py" = ["PLR0911", "PLR0912"]
+"src/ractogateway/huggingface_developer_kit/kit.py" = ["PLR0911", "PLR0912"]
+"src/ractogateway/adapters/ollama_kit.py" = ["PLC0415"]
+"src/ractogateway/adapters/huggingface_kit.py" = ["PLC0415"]
 # Redis: 5-param signatures mirror ExactMatchCache; SCAN-based clear is intentional
 "src/ractogateway/redis/exact_cache.py" = ["PLR0913"]
 # Celery: worker registers dynamic tasks via closures; BLE001 for broad except in wait()
@@ -311,6 +333,9 @@ module = [
     "kombu.*",
     # Kafka event streaming
     "kafka.*",
+    # Local-model inference providers
+    "ollama.*",
+    "huggingface_hub.*",
     # MCP
     "mcp.*",
     "starlette.*",

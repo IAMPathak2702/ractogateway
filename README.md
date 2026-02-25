@@ -20,6 +20,8 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 - [5-Line Quick Start](#5-line-quick-start)
 - [RACTO Prompt Engine](#racto-prompt-engine)
 - [Developer Kits](#developer-kits)
+  - [Ollama — Local Models, Zero API Key](#ollama--run-any-model-locally-zero-api-key)
+  - [HuggingFace — Cloud and Local TGI / vLLM](#huggingface--cloud-inference-api--local-tgi--vllm)
 - [Streaming](#streaming)
 - [Async Support](#async-support)
 - [Embeddings](#embeddings)
@@ -124,7 +126,11 @@ pip install ractogateway[openai]
 pip install ractogateway[google]
 pip install ractogateway[anthropic]
 
-# All LLM providers
+# Local model inference (no API key needed)
+pip install ractogateway[ollama]        # Ollama local server
+pip install ractogateway[huggingface]   # HuggingFace Inference API + TGI / vLLM
+
+# All LLM providers (cloud + local)
 pip install ractogateway[all]
 
 # RAG: base readers + NLP processing
@@ -374,15 +380,152 @@ messages = prompt.to_messages(
 
 ## Developer Kits
 
-RactoGateway has three kits — one for each AI provider. Import them with names you already know, then call `.Chat(...)` to create your AI:
+RactoGateway has **five kits** — three cloud providers and two local-model runtimes. Import them with names you already know, then call `.Chat(...)` to create your AI:
 
 ```python
-from ractogateway import openai_developer_kit as gpt      # ChatGPT / OpenAI
-from ractogateway import google_developer_kit as gemini   # Google Gemini
-from ractogateway import anthropic_developer_kit as claude # Anthropic Claude
+from ractogateway import openai_developer_kit as gpt        # ChatGPT / OpenAI
+from ractogateway import google_developer_kit as gemini     # Google Gemini
+from ractogateway import anthropic_developer_kit as claude  # Anthropic Claude
+from ractogateway import ollama_developer_kit as local      # Ollama (local models)
+from ractogateway import huggingface_developer_kit as hf    # HuggingFace / TGI / vLLM
 ```
 
 > **Note:** `and` is a reserved Python keyword in Python, so we use `claude` instead — cleaner anyway!
+
+### Ollama — Run Any Model Locally, Zero API Key
+
+[Ollama](https://ollama.com/) lets you run open-source LLMs (Llama 3, Mistral, Qwen, Gemma, and hundreds more) on your own hardware with a single command. No API key, no data leaving your machine.
+
+```bash
+# 1. Install Ollama  (https://ollama.com/download)
+# 2. Pull any model
+ollama pull llama3.2          # 2 GB — great for everyday tasks
+ollama pull mistral           # 4 GB — excellent instruction following
+ollama pull qwen2.5:7b        # 4.5 GB — strong multilingual
+ollama pull nomic-embed-text  # tiny embeddings model
+
+# 3. Install the Python extra
+pip install ractogateway[ollama]
+```
+
+```python
+from ractogateway import ollama_developer_kit as local, RactoPrompt
+
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer the user clearly.",
+    constraints=["Be concise."],
+    tone="Friendly",
+    output_format="text",
+)
+
+# No API key — Ollama runs locally at http://localhost:11434
+kit = local.Chat(model="llama3.2", default_prompt=prompt)
+response = kit.chat(local.ChatConfig(user_message="Explain transformers in one paragraph."))
+print(response.content)
+
+# Streaming works identically
+for chunk in kit.stream(local.ChatConfig(user_message="Write a haiku about Python.")):
+    print(chunk.delta.text, end="", flush=True)
+
+# Embeddings (requires an embedding-capable model like nomic-embed-text)
+embed_kit = local.Chat(model="llama3.2", embedding_model="nomic-embed-text")
+resp = embed_kit.embed(local.EmbeddingConfig(texts=["hello world", "goodbye world"]))
+print(resp.vectors[0].embedding[:5])
+```
+
+**`OllamaDeveloperKit` / `local.Chat` constructor parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | `str` | `"llama3.2"` | Model name from `ollama list` |
+| `base_url` | `str` | `"http://localhost:11434"` | Ollama server URL |
+| `embedding_model` | `str` | `"nomic-embed-text"` | Default model for `embed()` calls |
+| `default_prompt` | `RactoPrompt \| None` | `None` | Auto-used when `ChatConfig.prompt` is `None` |
+
+---
+
+### HuggingFace — Cloud Inference API + Local TGI / vLLM
+
+The HuggingFace kit works with three deployment modes:
+
+1. **HuggingFace Inference API** — free/paid cloud inference (set `HF_TOKEN`)
+2. **Local TGI** — [Text Generation Inference](https://github.com/huggingface/text-generation-inference) docker server
+3. **Local vLLM / Llama.cpp** — any OpenAI-compatible server
+
+```bash
+pip install ractogateway[huggingface]
+```
+
+**Cloud inference (HF Inference API):**
+
+```python
+import os
+from ractogateway import huggingface_developer_kit as hf, RactoPrompt
+
+os.environ["HF_TOKEN"] = "hf_..."   # or set in .env
+
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer the user clearly.",
+    constraints=["Be concise."],
+    tone="Friendly",
+    output_format="text",
+)
+
+kit = hf.Chat(
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    default_prompt=prompt,
+)
+response = kit.chat(hf.ChatConfig(user_message="What is attention in transformers?"))
+print(response.content)
+```
+
+**Local TGI server (no API key needed):**
+
+```bash
+# Pull and run TGI
+docker run --rm -p 8080:80 \
+  ghcr.io/huggingface/text-generation-inference \
+  --model-id meta-llama/Llama-3.2-3B-Instruct
+```
+
+```python
+# Point base_url at your local TGI server
+kit = hf.Chat(
+    model="tgi",
+    base_url="http://localhost:8080",
+    default_prompt=prompt,
+)
+```
+
+**Streaming, async, and embeddings work identically to every other kit:**
+
+```python
+# Streaming
+for chunk in kit.stream(hf.ChatConfig(user_message="Tell me a joke.")):
+    print(chunk.delta.text, end="", flush=True)
+
+# Embeddings via feature_extraction
+embed_kit = hf.Chat(
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+)
+resp = embed_kit.embed(hf.EmbeddingConfig(texts=["hello world"]))
+print(resp.vectors[0].embedding[:5])
+```
+
+**`HuggingFaceDeveloperKit` / `hf.Chat` constructor parameters:**
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | `str` | `"meta-llama/Llama-3.2-3B-Instruct"` | HF model repo ID or local-server label |
+| `api_key` | `str \| None` | `None` | Falls back to `HF_TOKEN` or `HUGGINGFACE_TOKEN` env vars |
+| `base_url` | `str \| None` | `None` | Local TGI / vLLM / Llama.cpp server URL |
+| `embedding_model` | `str` | `"sentence-transformers/all-MiniLM-L6-v2"` | Default model for `embed()` calls |
+| `default_prompt` | `RactoPrompt \| None` | `None` | Auto-used when `ChatConfig.prompt` is `None` |
+
+---
 
 ### Creating a Chat
 
@@ -393,6 +536,8 @@ Every kit exposes a `Chat` class — short, readable, and always works the same 
 kit = gpt.Chat(model="gpt-4o")
 kit = gemini.Chat(model="gemini-2.0-flash")
 kit = claude.Chat(model="claude-sonnet-4-6")
+kit = local.Chat(model="llama3.2")           # Ollama — no API key
+kit = hf.Chat(model="meta-llama/Llama-3.2-3B-Instruct")  # HuggingFace
 ```
 
 The API key is read automatically from your environment variable (`OPENAI_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY`). No extra setup needed.
@@ -454,16 +599,20 @@ kit = claude.Chat(
 
 ### Method Reference
 
-| Method | `gpt` | `gemini` | `claude` | Input | Output |
-| --- | :---: | :---: | :---: | --- | --- |
-| `chat(config)` | Yes | Yes | Yes | `ChatConfig` | `LLMResponse` |
-| `achat(config)` | Yes | Yes | Yes | `ChatConfig` | `LLMResponse` |
-| `stream(config)` | Yes | Yes | Yes | `ChatConfig` | `Iterator[StreamChunk]` |
-| `astream(config)` | Yes | Yes | Yes | `ChatConfig` | `AsyncIterator[StreamChunk]` |
-| `embed(config)` | Yes | Yes | — | `EmbeddingConfig` | `EmbeddingResponse` |
-| `aembed(config)` | Yes | Yes | — | `EmbeddingConfig` | `EmbeddingResponse` |
+| Method | `gpt` | `gemini` | `claude` | `local` | `hf` | Input | Output |
+| --- | :---: | :---: | :---: | :---: | :---: | --- | --- |
+| `chat(config)` | Yes | Yes | Yes | Yes | Yes | `ChatConfig` | `LLMResponse` |
+| `achat(config)` | Yes | Yes | Yes | Yes | Yes | `ChatConfig` | `LLMResponse` |
+| `stream(config)` | Yes | Yes | Yes | Yes | Yes | `ChatConfig` | `Iterator[StreamChunk]` |
+| `astream(config)` | Yes | Yes | Yes | Yes | Yes | `ChatConfig` | `AsyncIterator[StreamChunk]` |
+| `embed(config)` | Yes | Yes | — | Yes | Yes | `EmbeddingConfig` | `EmbeddingResponse` |
+| `aembed(config)` | Yes | Yes | — | Yes | Yes | `EmbeddingConfig` | `EmbeddingResponse` |
 
-> Anthropic does not offer a native embedding API. Use the OpenAI or Google kit for embeddings.
+> Anthropic does not offer a native embedding API. Use the OpenAI, Google, Ollama, or
+> HuggingFace kit for embeddings.
+>
+> Ollama embeddings require a dedicated embedding model (e.g. `nomic-embed-text`). Pull
+> it first: `ollama pull nomic-embed-text`.
 
 ---
 
