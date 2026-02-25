@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json as _json
 import os
+import time
 from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -41,6 +42,8 @@ if TYPE_CHECKING:
     from ractogateway.cache.exact_cache import ExactMatchCache
     from ractogateway.cache.semantic_cache import SemanticCache
     from ractogateway.routing.router import CostAwareRouter
+    from ractogateway.telemetry.metrics import GatewayMetricsMiddleware
+    from ractogateway.telemetry.tracer import RactoTracer
     from ractogateway.truncation.truncator import TokenTruncator
 
 
@@ -87,6 +90,14 @@ class OpenAIDeveloperKit:
         Optional :class:`~ractogateway.truncation.TokenTruncator`.
         Automatically trims conversation history to fit the model's context
         window before each API call.
+    tracer:
+        Optional :class:`~ractogateway.telemetry.RactoTracer`.
+        Emits OpenTelemetry spans for every chat, stream, and embed call.
+        Requires ``pip install ractogateway[telemetry]``.
+    metrics:
+        Optional :class:`~ractogateway.telemetry.GatewayMetricsMiddleware`.
+        Records Prometheus metrics (latency, tokens, cost, cache hit/miss).
+        Requires ``pip install ractogateway[prometheus]``.
     """
 
     provider: str = "openai"
@@ -103,6 +114,8 @@ class OpenAIDeveloperKit:
         semantic_cache: SemanticCache | None = None,
         router: CostAwareRouter | None = None,
         truncator: TokenTruncator | None = None,
+        tracer: RactoTracer | None = None,
+        metrics: GatewayMetricsMiddleware | None = None,
     ) -> None:
         if model == "auto" and router is None:
             raise ValueError(
@@ -118,6 +131,8 @@ class OpenAIDeveloperKit:
         self._semantic_cache = semantic_cache
         self._router = router
         self._truncator = truncator
+        self._tracer = tracer
+        self._metrics = metrics
         # Adapter pool: reuse per-model adapters (O(1) lookup after first use)
         self._adapters: dict[str, OpenAILLMKit] = {}
         # Warm-up the default adapter (skip for "auto" — router decides model)
@@ -205,8 +220,9 @@ class OpenAIDeveloperKit:
         """Synchronous chat completion with optional middleware pipeline.
 
         Middleware order: truncate → exact cache → semantic cache →
-        route model → API call → write caches.
+        route model → API call → write caches → record telemetry.
         """
+        t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
@@ -223,13 +239,37 @@ class OpenAIDeveloperKit:
                 config.max_tokens,
             )
             if cached is not None:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._metrics is not None:
+                    self._metrics.record_cache_hit("exact")
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider, model=model, latency_ms=_lat, cache_hit="exact"
+                    )
                 return cached
 
         # Semantic cache lookup
         if self._semantic_cache is not None:
             sem_cached = self._semantic_cache.get(config.user_message)
             if sem_cached is not None:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._metrics is not None:
+                    self._metrics.record_cache_hit("semantic")
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        cache_hit="semantic",
+                    )
                 return sem_cached
+
+        # Record cache misses for each checked cache
+        if self._metrics is not None:
+            if self._exact_cache is not None:
+                self._metrics.record_cache_miss("exact")
+            if self._semantic_cache is not None:
+                self._metrics.record_cache_miss("semantic")
 
         # API call
         adapter = self._get_adapter(model)
@@ -264,40 +304,88 @@ class OpenAIDeveloperKit:
                 ),
             )
 
-        response = _run_validated(config.user_message)
+        try:
+            response = _run_validated(config.user_message)
 
-        if config.auto_execute_tools and config.tools is not None:
-            for _ in range(config.max_tool_turns):
-                if (
-                    response.finish_reason is not FinishReason.TOOL_CALL
-                    or not response.tool_calls
-                ):
-                    break
-                results = execute_tool_calls_sync(response.tool_calls, config.tools)
-                follow_up_message = build_tool_followup_user_message(
-                    original_user_message=original_user_message,
-                    tool_calls=response.tool_calls,
-                    results=results,
+            if config.auto_execute_tools and config.tools is not None:
+                for _ in range(config.max_tool_turns):
+                    if (
+                        response.finish_reason is not FinishReason.TOOL_CALL
+                        or not response.tool_calls
+                    ):
+                        break
+                    results = execute_tool_calls_sync(response.tool_calls, config.tools)
+                    follow_up_message = build_tool_followup_user_message(
+                        original_user_message=original_user_message,
+                        tool_calls=response.tool_calls,
+                        results=results,
+                    )
+                    response = _run_validated(follow_up_message)
+
+            # Write to caches
+            if self._exact_cache is not None:
+                self._exact_cache.put(
+                    config.user_message,
+                    system_prompt,
+                    model,
+                    config.temperature,
+                    config.max_tokens,
+                    response,
                 )
-                response = _run_validated(follow_up_message)
+            if self._semantic_cache is not None:
+                self._semantic_cache.put(config.user_message, response)
 
-        # Write to caches
-        if self._exact_cache is not None:
-            self._exact_cache.put(
-                config.user_message,
-                system_prompt,
-                model,
-                config.temperature,
-                config.max_tokens,
-                response,
-            )
-        if self._semantic_cache is not None:
-            self._semantic_cache.put(config.user_message, response)
+            # Record telemetry
+            _lat = (time.perf_counter() - t0) * 1000
+            _in = response.usage.get("prompt_tokens", 0) if response.usage else 0
+            _out = response.usage.get("completion_tokens", 0) if response.usage else 0
+            _tcs = response.tool_calls or []
+            if self._tracer is not None:
+                self._tracer.record_chat_span(
+                    provider=self.provider,
+                    model=model,
+                    latency_ms=_lat,
+                    input_tokens=_in,
+                    output_tokens=_out,
+                    tool_calls=len(_tcs),
+                )
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=model,
+                    operation="chat",
+                    status="ok",
+                    latency_s=_lat / 1000,
+                    input_tokens=_in,
+                    output_tokens=_out,
+                    tool_calls=_tcs,
+                )
+            return response
 
-        return response
+        except Exception as _exc:
+            _lat = (time.perf_counter() - t0) * 1000
+            _etype = type(_exc).__name__
+            if self._tracer is not None:
+                self._tracer.record_chat_span(
+                    provider=self.provider,
+                    model=model,
+                    latency_ms=_lat,
+                    status="error",
+                    error_type=_etype,
+                )
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=model,
+                    operation="chat",
+                    status="error",
+                    latency_s=_lat / 1000,
+                )
+            raise
 
     async def achat(self, config: ChatConfig) -> LLMResponse:
         """Async chat completion with optional middleware pipeline."""
+        t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
@@ -314,13 +402,36 @@ class OpenAIDeveloperKit:
                 config.max_tokens,
             )
             if cached is not None:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._metrics is not None:
+                    self._metrics.record_cache_hit("exact")
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider, model=model, latency_ms=_lat, cache_hit="exact"
+                    )
                 return cached
 
         # Semantic cache lookup
         if self._semantic_cache is not None:
             sem_cached = self._semantic_cache.get(config.user_message)
             if sem_cached is not None:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._metrics is not None:
+                    self._metrics.record_cache_hit("semantic")
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        cache_hit="semantic",
+                    )
                 return sem_cached
+
+        if self._metrics is not None:
+            if self._exact_cache is not None:
+                self._metrics.record_cache_miss("exact")
+            if self._semantic_cache is not None:
+                self._metrics.record_cache_miss("semantic")
 
         # API call
         adapter = self._get_adapter(model)
@@ -355,40 +466,86 @@ class OpenAIDeveloperKit:
                 ),
             )
 
-        response = await _arun_validated(config.user_message)
+        try:
+            response = await _arun_validated(config.user_message)
 
-        if config.auto_execute_tools and config.tools is not None:
-            for _ in range(config.max_tool_turns):
-                if (
-                    response.finish_reason is not FinishReason.TOOL_CALL
-                    or not response.tool_calls
-                ):
-                    break
-                results = await execute_tool_calls_async(
-                    response.tool_calls,
-                    config.tools,
+            if config.auto_execute_tools and config.tools is not None:
+                for _ in range(config.max_tool_turns):
+                    if (
+                        response.finish_reason is not FinishReason.TOOL_CALL
+                        or not response.tool_calls
+                    ):
+                        break
+                    results = await execute_tool_calls_async(
+                        response.tool_calls,
+                        config.tools,
+                    )
+                    follow_up_message = build_tool_followup_user_message(
+                        original_user_message=original_user_message,
+                        tool_calls=response.tool_calls,
+                        results=results,
+                    )
+                    response = await _arun_validated(follow_up_message)
+
+            # Write to caches
+            if self._exact_cache is not None:
+                self._exact_cache.put(
+                    config.user_message,
+                    system_prompt,
+                    model,
+                    config.temperature,
+                    config.max_tokens,
+                    response,
                 )
-                follow_up_message = build_tool_followup_user_message(
-                    original_user_message=original_user_message,
-                    tool_calls=response.tool_calls,
-                    results=results,
+            if self._semantic_cache is not None:
+                self._semantic_cache.put(config.user_message, response)
+
+            _lat = (time.perf_counter() - t0) * 1000
+            _in = response.usage.get("prompt_tokens", 0) if response.usage else 0
+            _out = response.usage.get("completion_tokens", 0) if response.usage else 0
+            _tcs = response.tool_calls or []
+            if self._tracer is not None:
+                self._tracer.record_chat_span(
+                    provider=self.provider,
+                    model=model,
+                    latency_ms=_lat,
+                    input_tokens=_in,
+                    output_tokens=_out,
+                    tool_calls=len(_tcs),
                 )
-                response = await _arun_validated(follow_up_message)
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=model,
+                    operation="chat",
+                    status="ok",
+                    latency_s=_lat / 1000,
+                    input_tokens=_in,
+                    output_tokens=_out,
+                    tool_calls=_tcs,
+                )
+            return response
 
-        # Write to caches
-        if self._exact_cache is not None:
-            self._exact_cache.put(
-                config.user_message,
-                system_prompt,
-                model,
-                config.temperature,
-                config.max_tokens,
-                response,
-            )
-        if self._semantic_cache is not None:
-            self._semantic_cache.put(config.user_message, response)
-
-        return response
+        except Exception as _exc:
+            _lat = (time.perf_counter() - t0) * 1000
+            _etype = type(_exc).__name__
+            if self._tracer is not None:
+                self._tracer.record_chat_span(
+                    provider=self.provider,
+                    model=model,
+                    latency_ms=_lat,
+                    status="error",
+                    error_type=_etype,
+                )
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=model,
+                    operation="chat",
+                    status="error",
+                    latency_s=_lat / 1000,
+                )
+            raise
 
     # ------------------------------------------------------------------
     # Stream  (sync / async)
@@ -404,6 +561,7 @@ class OpenAIDeveloperKit:
                 if chunk.is_final:
                     print(f"\\nTokens: {chunk.usage}")
         """
+        t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
@@ -429,29 +587,89 @@ class OpenAIDeveloperKit:
 
         accumulated = ""
         tc_acc: dict[int, dict[str, Any]] = {}
+        _span_recorded = False
 
         try:
             with client.chat.completions.create(**request) as stream_resp:
                 for event in stream_resp:
-                    chunk = self._process_openai_event(
-                        event,
-                        accumulated,
-                        tc_acc,
-                    )
+                    chunk = self._process_openai_event(event, accumulated, tc_acc)
                     if chunk is not None:
                         accumulated = chunk.accumulated_text
                         if chunk.is_final and validation_config.response_model is not None:
                             chunk.parsed = validate_stream_final(
                                 chunk.accumulated_text, validation_config
                             )
+                        if chunk.is_final and not _span_recorded:
+                            _span_recorded = True
+                            _lat = (time.perf_counter() - t0) * 1000
+                            _in = chunk.usage.get("prompt_tokens", 0) if chunk.usage else 0
+                            _out = chunk.usage.get("completion_tokens", 0) if chunk.usage else 0
+                            _tcs = chunk.tool_calls or []
+                            if self._tracer is not None:
+                                self._tracer.record_chat_span(
+                                    provider=self.provider,
+                                    model=model,
+                                    latency_ms=_lat,
+                                    input_tokens=_in,
+                                    output_tokens=_out,
+                                    tool_calls=len(_tcs),
+                                )
+                            if self._metrics is not None:
+                                self._metrics.record_request(
+                                    provider=self.provider,
+                                    model=model,
+                                    operation="stream",
+                                    status="ok",
+                                    latency_s=_lat / 1000,
+                                    input_tokens=_in,
+                                    output_tokens=_out,
+                                    tool_calls=_tcs,
+                                )
                         yield chunk
         except RactoGatewayError:
+            if not _span_recorded:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        status="error",
+                        error_type="RactoGatewayError",
+                    )
+                if self._metrics is not None:
+                    self._metrics.record_request(
+                        provider=self.provider,
+                        model=model,
+                        operation="stream",
+                        status="error",
+                        latency_s=(time.perf_counter() - t0),
+                    )
             raise
         except Exception as exc:
+            if not _span_recorded:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        status="error",
+                        error_type=type(exc).__name__,
+                    )
+                if self._metrics is not None:
+                    self._metrics.record_request(
+                        provider=self.provider,
+                        model=model,
+                        operation="stream",
+                        status="error",
+                        latency_s=(time.perf_counter() - t0),
+                    )
             raise _wrap_provider_error(exc, "openai") from exc
 
     async def astream(self, config: ChatConfig) -> AsyncIterator[StreamChunk]:
         """Async streaming — yields ``StreamChunk`` objects."""
+        t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
@@ -477,25 +695,84 @@ class OpenAIDeveloperKit:
 
         accumulated = ""
         tc_acc: dict[int, dict[str, Any]] = {}
+        _span_recorded = False
 
         try:
             async with await client.chat.completions.create(**request) as stream_resp:
                 async for event in stream_resp:
-                    chunk = self._process_openai_event(
-                        event,
-                        accumulated,
-                        tc_acc,
-                    )
+                    chunk = self._process_openai_event(event, accumulated, tc_acc)
                     if chunk is not None:
                         accumulated = chunk.accumulated_text
                         if chunk.is_final and validation_config.response_model is not None:
                             chunk.parsed = validate_stream_final(
                                 chunk.accumulated_text, validation_config
                             )
+                        if chunk.is_final and not _span_recorded:
+                            _span_recorded = True
+                            _lat = (time.perf_counter() - t0) * 1000
+                            _in = chunk.usage.get("prompt_tokens", 0) if chunk.usage else 0
+                            _out = chunk.usage.get("completion_tokens", 0) if chunk.usage else 0
+                            _tcs = chunk.tool_calls or []
+                            if self._tracer is not None:
+                                self._tracer.record_chat_span(
+                                    provider=self.provider,
+                                    model=model,
+                                    latency_ms=_lat,
+                                    input_tokens=_in,
+                                    output_tokens=_out,
+                                    tool_calls=len(_tcs),
+                                )
+                            if self._metrics is not None:
+                                self._metrics.record_request(
+                                    provider=self.provider,
+                                    model=model,
+                                    operation="stream",
+                                    status="ok",
+                                    latency_s=_lat / 1000,
+                                    input_tokens=_in,
+                                    output_tokens=_out,
+                                    tool_calls=_tcs,
+                                )
                         yield chunk
         except RactoGatewayError:
+            if not _span_recorded:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        status="error",
+                        error_type="RactoGatewayError",
+                    )
+                if self._metrics is not None:
+                    self._metrics.record_request(
+                        provider=self.provider,
+                        model=model,
+                        operation="stream",
+                        status="error",
+                        latency_s=(time.perf_counter() - t0),
+                    )
             raise
         except Exception as exc:
+            if not _span_recorded:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        status="error",
+                        error_type=type(exc).__name__,
+                    )
+                if self._metrics is not None:
+                    self._metrics.record_request(
+                        provider=self.provider,
+                        model=model,
+                        operation="stream",
+                        status="error",
+                        latency_s=(time.perf_counter() - t0),
+                    )
             raise _wrap_provider_error(exc, "openai") from exc
 
     # ------------------------------------------------------------------
@@ -504,13 +781,91 @@ class OpenAIDeveloperKit:
 
     def embed(self, config: EmbeddingConfig) -> EmbeddingResponse:
         """Synchronous embedding."""
+        t0 = time.perf_counter()
         client = self._sync_client()
-        return self._do_embed(client, config)
+        try:
+            result = self._do_embed(client, config)
+            _lat = (time.perf_counter() - t0) * 1000
+            _model = config.model or self._embedding_model
+            _in = result.usage.get("prompt_tokens", 0) if result.usage else 0
+            if self._tracer is not None:
+                self._tracer.record_embed_span(
+                    provider=self.provider, model=_model, latency_ms=_lat, input_tokens=_in
+                )
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=_model,
+                    operation="embed",
+                    status="ok",
+                    latency_s=_lat / 1000,
+                    input_tokens=_in,
+                )
+            return result
+        except Exception as _exc:
+            _lat = (time.perf_counter() - t0) * 1000
+            _model = config.model or self._embedding_model
+            if self._tracer is not None:
+                self._tracer.record_embed_span(
+                    provider=self.provider,
+                    model=_model,
+                    latency_ms=_lat,
+                    status="error",
+                    error_type=type(_exc).__name__,
+                )
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=_model,
+                    operation="embed",
+                    status="error",
+                    latency_s=_lat / 1000,
+                )
+            raise
 
     async def aembed(self, config: EmbeddingConfig) -> EmbeddingResponse:
         """Async embedding."""
+        t0 = time.perf_counter()
         client = self._async_client()
-        return await self._do_aembed(client, config)
+        try:
+            result = await self._do_aembed(client, config)
+            _lat = (time.perf_counter() - t0) * 1000
+            _model = config.model or self._embedding_model
+            _in = result.usage.get("prompt_tokens", 0) if result.usage else 0
+            if self._tracer is not None:
+                self._tracer.record_embed_span(
+                    provider=self.provider, model=_model, latency_ms=_lat, input_tokens=_in
+                )
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=_model,
+                    operation="embed",
+                    status="ok",
+                    latency_s=_lat / 1000,
+                    input_tokens=_in,
+                )
+            return result
+        except Exception as _exc:
+            _lat = (time.perf_counter() - t0) * 1000
+            _model = config.model or self._embedding_model
+            if self._tracer is not None:
+                self._tracer.record_embed_span(
+                    provider=self.provider,
+                    model=_model,
+                    latency_ms=_lat,
+                    status="error",
+                    error_type=type(_exc).__name__,
+                )
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=_model,
+                    operation="embed",
+                    status="error",
+                    latency_s=_lat / 1000,
+                )
+            raise
 
     # ------------------------------------------------------------------
     # Internal — OpenAI stream event processing

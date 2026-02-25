@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json as _json
 import os
+import time
 from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -43,6 +44,8 @@ if TYPE_CHECKING:
     from ractogateway.cache.exact_cache import ExactMatchCache
     from ractogateway.cache.semantic_cache import SemanticCache
     from ractogateway.routing.router import CostAwareRouter
+    from ractogateway.telemetry.metrics import GatewayMetricsMiddleware
+    from ractogateway.telemetry.tracer import RactoTracer
     from ractogateway.truncation.truncator import TokenTruncator
 
 
@@ -80,6 +83,14 @@ class AnthropicDeveloperKit:
         **Required** when ``model="auto"``.
     truncator:
         Optional :class:`~ractogateway.truncation.TokenTruncator`.
+    tracer:
+        Optional :class:`~ractogateway.telemetry.RactoTracer`.
+        Emits OpenTelemetry spans for every chat and stream call.
+        Requires ``pip install ractogateway[telemetry]``.
+    metrics:
+        Optional :class:`~ractogateway.telemetry.GatewayMetricsMiddleware`.
+        Records Prometheus metrics (latency, tokens, cost, cache hit/miss).
+        Requires ``pip install ractogateway[prometheus]``.
     """
 
     provider: str = "anthropic"
@@ -94,6 +105,8 @@ class AnthropicDeveloperKit:
         semantic_cache: SemanticCache | None = None,
         router: CostAwareRouter | None = None,
         truncator: TokenTruncator | None = None,
+        tracer: RactoTracer | None = None,
+        metrics: GatewayMetricsMiddleware | None = None,
     ) -> None:
         if model == "auto" and router is None:
             raise ValueError(
@@ -107,6 +120,8 @@ class AnthropicDeveloperKit:
         self._semantic_cache = semantic_cache
         self._router = router
         self._truncator = truncator
+        self._tracer = tracer
+        self._metrics = metrics
         # Adapter pool for cost-aware routing
         self._adapters: dict[str, AnthropicLLMKit] = {}
         fallback = "claude-haiku-4-5-20251001"
@@ -170,13 +185,19 @@ class AnthropicDeveloperKit:
     # ------------------------------------------------------------------
 
     def chat(self, config: ChatConfig) -> LLMResponse:
-        """Synchronous chat completion with optional middleware pipeline."""
+        """Synchronous chat completion with optional middleware pipeline.
+
+        Middleware order: truncate → exact cache → semantic cache →
+        route model → API call → write caches → record telemetry.
+        """
+        t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
         system_prompt = prompt.compile()
 
+        # Exact-match cache lookup
         if self._exact_cache is not None:
             cached = self._exact_cache.get(
                 config.user_message,
@@ -186,13 +207,39 @@ class AnthropicDeveloperKit:
                 config.max_tokens,
             )
             if cached is not None:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._metrics is not None:
+                    self._metrics.record_cache_hit("exact")
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider, model=model, latency_ms=_lat, cache_hit="exact"
+                    )
                 return cached
 
+        # Semantic cache lookup
         if self._semantic_cache is not None:
             sem_cached = self._semantic_cache.get(config.user_message)
             if sem_cached is not None:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._metrics is not None:
+                    self._metrics.record_cache_hit("semantic")
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        cache_hit="semantic",
+                    )
                 return sem_cached
 
+        # Record cache misses for each checked cache
+        if self._metrics is not None:
+            if self._exact_cache is not None:
+                self._metrics.record_cache_miss("exact")
+            if self._semantic_cache is not None:
+                self._metrics.record_cache_miss("semantic")
+
+        # API call
         adapter = self._get_adapter(model)
         original_user_message = config.user_message
         history_turns: list[ChatTurn] | None = (
@@ -225,45 +272,95 @@ class AnthropicDeveloperKit:
                 ),
             )
 
-        response = _run_validated(config.user_message)
+        try:
+            response = _run_validated(config.user_message)
 
-        if config.auto_execute_tools and config.tools is not None:
-            for _ in range(config.max_tool_turns):
-                if (
-                    response.finish_reason is not FinishReason.TOOL_CALL
-                    or not response.tool_calls
-                ):
-                    break
-                results = execute_tool_calls_sync(response.tool_calls, config.tools)
-                follow_up_message = build_tool_followup_user_message(
-                    original_user_message=original_user_message,
-                    tool_calls=response.tool_calls,
-                    results=results,
+            if config.auto_execute_tools and config.tools is not None:
+                for _ in range(config.max_tool_turns):
+                    if (
+                        response.finish_reason is not FinishReason.TOOL_CALL
+                        or not response.tool_calls
+                    ):
+                        break
+                    results = execute_tool_calls_sync(response.tool_calls, config.tools)
+                    follow_up_message = build_tool_followup_user_message(
+                        original_user_message=original_user_message,
+                        tool_calls=response.tool_calls,
+                        results=results,
+                    )
+                    response = _run_validated(follow_up_message)
+
+            # Write to caches
+            if self._exact_cache is not None:
+                self._exact_cache.put(
+                    config.user_message,
+                    system_prompt,
+                    model,
+                    config.temperature,
+                    config.max_tokens,
+                    response,
                 )
-                response = _run_validated(follow_up_message)
+            if self._semantic_cache is not None:
+                self._semantic_cache.put(config.user_message, response)
 
-        if self._exact_cache is not None:
-            self._exact_cache.put(
-                config.user_message,
-                system_prompt,
-                model,
-                config.temperature,
-                config.max_tokens,
-                response,
-            )
-        if self._semantic_cache is not None:
-            self._semantic_cache.put(config.user_message, response)
+            # Record telemetry
+            _lat = (time.perf_counter() - t0) * 1000
+            _in = response.usage.get("prompt_tokens", 0) if response.usage else 0
+            _out = response.usage.get("completion_tokens", 0) if response.usage else 0
+            _tcs = response.tool_calls or []
+            if self._tracer is not None:
+                self._tracer.record_chat_span(
+                    provider=self.provider,
+                    model=model,
+                    latency_ms=_lat,
+                    input_tokens=_in,
+                    output_tokens=_out,
+                    tool_calls=len(_tcs),
+                )
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=model,
+                    operation="chat",
+                    status="ok",
+                    latency_s=_lat / 1000,
+                    input_tokens=_in,
+                    output_tokens=_out,
+                    tool_calls=_tcs,
+                )
+            return response
 
-        return response
+        except Exception as _exc:
+            _lat = (time.perf_counter() - t0) * 1000
+            _etype = type(_exc).__name__
+            if self._tracer is not None:
+                self._tracer.record_chat_span(
+                    provider=self.provider,
+                    model=model,
+                    latency_ms=_lat,
+                    status="error",
+                    error_type=_etype,
+                )
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=model,
+                    operation="chat",
+                    status="error",
+                    latency_s=_lat / 1000,
+                )
+            raise
 
     async def achat(self, config: ChatConfig) -> LLMResponse:
         """Async chat completion with optional middleware pipeline."""
+        t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
         system_prompt = prompt.compile()
 
+        # Exact-match cache lookup
         if self._exact_cache is not None:
             cached = self._exact_cache.get(
                 config.user_message,
@@ -273,13 +370,38 @@ class AnthropicDeveloperKit:
                 config.max_tokens,
             )
             if cached is not None:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._metrics is not None:
+                    self._metrics.record_cache_hit("exact")
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider, model=model, latency_ms=_lat, cache_hit="exact"
+                    )
                 return cached
 
+        # Semantic cache lookup
         if self._semantic_cache is not None:
             sem_cached = self._semantic_cache.get(config.user_message)
             if sem_cached is not None:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._metrics is not None:
+                    self._metrics.record_cache_hit("semantic")
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        cache_hit="semantic",
+                    )
                 return sem_cached
 
+        if self._metrics is not None:
+            if self._exact_cache is not None:
+                self._metrics.record_cache_miss("exact")
+            if self._semantic_cache is not None:
+                self._metrics.record_cache_miss("semantic")
+
+        # API call
         adapter = self._get_adapter(model)
         original_user_message = config.user_message
         history_turns: list[ChatTurn] | None = (
@@ -312,39 +434,86 @@ class AnthropicDeveloperKit:
                 ),
             )
 
-        response = await _arun_validated(config.user_message)
+        try:
+            response = await _arun_validated(config.user_message)
 
-        if config.auto_execute_tools and config.tools is not None:
-            for _ in range(config.max_tool_turns):
-                if (
-                    response.finish_reason is not FinishReason.TOOL_CALL
-                    or not response.tool_calls
-                ):
-                    break
-                results = await execute_tool_calls_async(
-                    response.tool_calls,
-                    config.tools,
+            if config.auto_execute_tools and config.tools is not None:
+                for _ in range(config.max_tool_turns):
+                    if (
+                        response.finish_reason is not FinishReason.TOOL_CALL
+                        or not response.tool_calls
+                    ):
+                        break
+                    results = await execute_tool_calls_async(
+                        response.tool_calls,
+                        config.tools,
+                    )
+                    follow_up_message = build_tool_followup_user_message(
+                        original_user_message=original_user_message,
+                        tool_calls=response.tool_calls,
+                        results=results,
+                    )
+                    response = await _arun_validated(follow_up_message)
+
+            # Write to caches
+            if self._exact_cache is not None:
+                self._exact_cache.put(
+                    config.user_message,
+                    system_prompt,
+                    model,
+                    config.temperature,
+                    config.max_tokens,
+                    response,
                 )
-                follow_up_message = build_tool_followup_user_message(
-                    original_user_message=original_user_message,
-                    tool_calls=response.tool_calls,
-                    results=results,
+            if self._semantic_cache is not None:
+                self._semantic_cache.put(config.user_message, response)
+
+            _lat = (time.perf_counter() - t0) * 1000
+            _in = response.usage.get("prompt_tokens", 0) if response.usage else 0
+            _out = response.usage.get("completion_tokens", 0) if response.usage else 0
+            _tcs = response.tool_calls or []
+            if self._tracer is not None:
+                self._tracer.record_chat_span(
+                    provider=self.provider,
+                    model=model,
+                    latency_ms=_lat,
+                    input_tokens=_in,
+                    output_tokens=_out,
+                    tool_calls=len(_tcs),
                 )
-                response = await _arun_validated(follow_up_message)
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=model,
+                    operation="chat",
+                    status="ok",
+                    latency_s=_lat / 1000,
+                    input_tokens=_in,
+                    output_tokens=_out,
+                    tool_calls=_tcs,
+                )
+            return response
 
-        if self._exact_cache is not None:
-            self._exact_cache.put(
-                config.user_message,
-                system_prompt,
-                model,
-                config.temperature,
-                config.max_tokens,
-                response,
-            )
-        if self._semantic_cache is not None:
-            self._semantic_cache.put(config.user_message, response)
-
-        return response
+        except Exception as _exc:
+            _lat = (time.perf_counter() - t0) * 1000
+            _etype = type(_exc).__name__
+            if self._tracer is not None:
+                self._tracer.record_chat_span(
+                    provider=self.provider,
+                    model=model,
+                    latency_ms=_lat,
+                    status="error",
+                    error_type=_etype,
+                )
+            if self._metrics is not None:
+                self._metrics.record_request(
+                    provider=self.provider,
+                    model=model,
+                    operation="chat",
+                    status="error",
+                    latency_s=_lat / 1000,
+                )
+            raise
 
     # ------------------------------------------------------------------
     # Stream  (sync / async)
@@ -360,6 +529,7 @@ class AnthropicDeveloperKit:
                 if chunk.is_final:
                     print(f"\\nTokens: {chunk.usage}")
         """
+        t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
@@ -385,6 +555,7 @@ class AnthropicDeveloperKit:
         tc_acc: dict[int, dict[str, Any]] = {}
         finish_reason = FinishReason.STOP
         usage: dict[str, int] = {}
+        _span_recorded = False
 
         try:
             with client.messages.stream(**request) as stream_resp:
@@ -406,14 +577,77 @@ class AnthropicDeveloperKit:
                             chunk.parsed = validate_stream_final(
                                 chunk.accumulated_text, validation_config
                             )
+                        if chunk.is_final and not _span_recorded:
+                            _span_recorded = True
+                            _lat = (time.perf_counter() - t0) * 1000
+                            _in = chunk.usage.get("prompt_tokens", 0) if chunk.usage else 0
+                            _out = chunk.usage.get("completion_tokens", 0) if chunk.usage else 0
+                            _tcs = chunk.tool_calls or []
+                            if self._tracer is not None:
+                                self._tracer.record_chat_span(
+                                    provider=self.provider,
+                                    model=model,
+                                    latency_ms=_lat,
+                                    input_tokens=_in,
+                                    output_tokens=_out,
+                                    tool_calls=len(_tcs),
+                                )
+                            if self._metrics is not None:
+                                self._metrics.record_request(
+                                    provider=self.provider,
+                                    model=model,
+                                    operation="stream",
+                                    status="ok",
+                                    latency_s=_lat / 1000,
+                                    input_tokens=_in,
+                                    output_tokens=_out,
+                                    tool_calls=_tcs,
+                                )
                         yield chunk
         except RactoGatewayError:
+            if not _span_recorded:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        status="error",
+                        error_type="RactoGatewayError",
+                    )
+                if self._metrics is not None:
+                    self._metrics.record_request(
+                        provider=self.provider,
+                        model=model,
+                        operation="stream",
+                        status="error",
+                        latency_s=(time.perf_counter() - t0),
+                    )
             raise
         except Exception as exc:
+            if not _span_recorded:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        status="error",
+                        error_type=type(exc).__name__,
+                    )
+                if self._metrics is not None:
+                    self._metrics.record_request(
+                        provider=self.provider,
+                        model=model,
+                        operation="stream",
+                        status="error",
+                        latency_s=(time.perf_counter() - t0),
+                    )
             raise _wrap_provider_error(exc, "anthropic") from exc
 
     async def astream(self, config: ChatConfig) -> AsyncIterator[StreamChunk]:
         """Async streaming via Anthropic's async ``messages.stream()``."""
+        t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
@@ -439,6 +673,7 @@ class AnthropicDeveloperKit:
         tc_acc: dict[int, dict[str, Any]] = {}
         finish_reason = FinishReason.STOP
         usage: dict[str, int] = {}
+        _span_recorded = False
 
         try:
             async with client.messages.stream(**request) as stream_resp:
@@ -460,10 +695,72 @@ class AnthropicDeveloperKit:
                             chunk.parsed = validate_stream_final(
                                 chunk.accumulated_text, validation_config
                             )
+                        if chunk.is_final and not _span_recorded:
+                            _span_recorded = True
+                            _lat = (time.perf_counter() - t0) * 1000
+                            _in = chunk.usage.get("prompt_tokens", 0) if chunk.usage else 0
+                            _out = chunk.usage.get("completion_tokens", 0) if chunk.usage else 0
+                            _tcs = chunk.tool_calls or []
+                            if self._tracer is not None:
+                                self._tracer.record_chat_span(
+                                    provider=self.provider,
+                                    model=model,
+                                    latency_ms=_lat,
+                                    input_tokens=_in,
+                                    output_tokens=_out,
+                                    tool_calls=len(_tcs),
+                                )
+                            if self._metrics is not None:
+                                self._metrics.record_request(
+                                    provider=self.provider,
+                                    model=model,
+                                    operation="stream",
+                                    status="ok",
+                                    latency_s=_lat / 1000,
+                                    input_tokens=_in,
+                                    output_tokens=_out,
+                                    tool_calls=_tcs,
+                                )
                         yield chunk
         except RactoGatewayError:
+            if not _span_recorded:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        status="error",
+                        error_type="RactoGatewayError",
+                    )
+                if self._metrics is not None:
+                    self._metrics.record_request(
+                        provider=self.provider,
+                        model=model,
+                        operation="stream",
+                        status="error",
+                        latency_s=(time.perf_counter() - t0),
+                    )
             raise
         except Exception as exc:
+            if not _span_recorded:
+                _lat = (time.perf_counter() - t0) * 1000
+                if self._tracer is not None:
+                    self._tracer.record_chat_span(
+                        provider=self.provider,
+                        model=model,
+                        latency_ms=_lat,
+                        status="error",
+                        error_type=type(exc).__name__,
+                    )
+                if self._metrics is not None:
+                    self._metrics.record_request(
+                        provider=self.provider,
+                        model=model,
+                        operation="stream",
+                        status="error",
+                        latency_s=(time.perf_counter() - t0),
+                    )
             raise _wrap_provider_error(exc, "anthropic") from exc
 
     # ------------------------------------------------------------------

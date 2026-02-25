@@ -1678,6 +1678,89 @@ except ResponseModelValidationError as e:
 
 ---
 
+## 19. Telemetry & Observability
+
+RactoGateway ships production-grade observability with **zero changes** to existing call sites.
+Attach a `RactoTracer` and/or `GatewayMetricsMiddleware` to any kit and every LLM call is
+automatically instrumented.
+
+### Installation
+
+```bash
+pip install "ractogateway[observability]"   # OTEL tracing + Prometheus metrics
+pip install "ractogateway[telemetry]"        # OTEL tracing only
+pip install "ractogateway[prometheus]"       # Prometheus metrics only
+```
+
+### Quick start
+
+```python
+from ractogateway import openai_developer_kit as opd
+from ractogateway.telemetry import RactoTracer, GatewayMetricsMiddleware, PrometheusExporter
+
+tracer  = RactoTracer(otlp_endpoint="http://localhost:4317", console=True)
+metrics = GatewayMetricsMiddleware()
+PrometheusExporter(port=8000).start()    # scrape http://localhost:8000/metrics
+
+kit = opd.OpenAIDeveloperKit(
+    model="gpt-4o",
+    default_prompt=prompt,
+    tracer=tracer,
+    metrics=metrics,
+)
+response = kit.chat(opd.ChatConfig(user_message="Hello!"))
+# One OTEL span emitted, one Prometheus data-point recorded.
+```
+
+The same `tracer=` / `metrics=` parameters work on **GoogleDeveloperKit** and
+**AnthropicDeveloperKit**.
+
+### What is recorded automatically
+
+| Event | Tracer span | Prometheus metrics |
+|---|---|---|
+| Successful chat/stream | `llm.chat` with latency, tokens, cost | `requests_total`, `duration_seconds`, `tokens_total`, `cost_usd_total` |
+| Cache hit (exact/semantic) | `llm.chat` with `cache_hit="exact"/"semantic"`, 0 tokens | `cache_hits_total` |
+| Cache miss | — | `cache_misses_total` |
+| Tool call | `tool_calls` attribute on span | `tool_calls_total{tool_name}` |
+| Error | `status="error"`, `error_type=ExcName` | `requests_total{status="error"}` |
+| Embedding | `llm.embed` | `requests_total{operation="embed"}` |
+
+### OTEL export backends
+
+```python
+# Jaeger / Grafana Tempo (gRPC)
+RactoTracer(otlp_endpoint="http://jaeger:4317")
+
+# Zipkin / Tempo (HTTP)
+RactoTracer(otlp_http_endpoint="http://tempo:4318")
+
+# In-memory capture for unit tests — no external backend needed
+tracer = RactoTracer(in_memory=True)
+kit.chat(...)
+assert tracer.spans[0].provider == "openai"
+tracer.clear_spans()
+```
+
+### Custom pricing
+
+```python
+from ractogateway.telemetry import ModelPricing, RactoTracer
+
+custom = {"my-ft-gpt4": ModelPricing(input_per_million=5.0, output_per_million=15.0)}
+tracer = RactoTracer(otlp_endpoint="...", price_table=custom)
+```
+
+### Grafana dashboard
+
+Import `dashboards/grafana_dashboard.json` into Grafana to get 20+ pre-built panels covering
+latency percentiles (p50/p95/p99), token rate, cost rate, cache hit/miss ratio, error rate,
+tool call distribution, and a per-model summary table.
+
+Full reference: [Telemetry guide](telemetry.md) | [API reference](../api/telemetry.md)
+
+---
+
 ## Quick Reference Card
 
 ```python

@@ -156,6 +156,21 @@ redis = ["redis>=5.0,<6.0"]
 celery = ["celery>=5.3,<6.0"]
 kafka = ["kafka-python>=2.0,<3.0"]
 
+# ── Observability (optional) ───────────────────────────────────────────────────
+# OpenTelemetry tracing — spans per LLM call, OTLP gRPC/HTTP export (Jaeger, Tempo, etc.)
+telemetry = [
+    "opentelemetry-sdk>=1.20,<2.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20,<2.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20,<2.0",
+]
+# Prometheus metrics — 7 labelled metrics, /metrics HTTP endpoint
+prometheus = ["prometheus-client>=0.19,<1.0"]
+# Both tracing and metrics
+observability = [
+    "ractogateway[telemetry]",
+    "ractogateway[prometheus]",
+]
+
 dev = [
     "ractogateway[all]",
     "ractogateway[rag]",
@@ -164,6 +179,7 @@ dev = [
     "ractogateway[celery]",
     "ractogateway[kafka]",
     "ractogateway[mcp]",
+    "ractogateway[observability]",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
@@ -299,6 +315,9 @@ module = [
     "mcp.*",
     "starlette.*",
     "uvicorn.*",
+    # Observability
+    "opentelemetry.*",
+    "prometheus_client.*",
 ]
 ignore_missing_imports = true
 
