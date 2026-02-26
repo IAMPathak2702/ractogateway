@@ -29,6 +29,7 @@ guide/tools
 guide/embeddings
 guide/finetune
 guide/rag
+guide/pipelines
 guide/batch
 guide/cache
 guide/routing

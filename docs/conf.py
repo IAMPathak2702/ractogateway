@@ -4,8 +4,14 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from pathlib import Path
 from typing import Protocol
+
+from sphinx.deprecation import RemovedInSphinx10Warning
+
+
+warnings.filterwarnings("ignore", category=RemovedInSphinx10Warning)
 
 
 class _SphinxApp(Protocol):
@@ -107,6 +113,8 @@ suppress_warnings = [
     "py.duplicate",  # classes re-exported via kit __init__.py
     "sphinx_autodoc_typehints.forward_reference",  # JsonValue forward ref in engine.py
     "sphinx_autodoc_typehints.guarded_import",  # classmethod subscript in typehints
+    "toc.not_included",  # keep standalone pages that are intentionally not in nav
+    "docutils",  # tolerate third-party/generated docstring rst quirks
 ]
 
 # intersphinx — link to upstream docs

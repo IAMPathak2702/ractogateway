@@ -36,6 +36,7 @@
 17. [RAG — Retrieval-Augmented Generation](#17-rag--retrieval-augmented-generation)
 18. [Redis — Production Infrastructure](#18-redis--production-infrastructure)
 19. [Common Mistakes & How to Fix Them](#19-common-mistakes--how-to-fix-them)
+20. [Prebuilt Pipelines — Production Workflows](#20-prebuilt-pipelines--production-workflows)
 
 ---
 
@@ -1929,6 +1930,47 @@ latency percentiles (p50/p95/p99), token rate, cost rate, cache hit/miss ratio, 
 tool call distribution, and a per-model summary table.
 
 Full reference: [Telemetry guide](telemetry.md) | [API reference](../api/telemetry.md)
+
+---
+
+## 20. Prebuilt Pipelines — Production Workflows
+
+RactoGateway includes prebuilt pipelines for common end-to-end tasks where a
+single `chat()` call is not enough.
+
+### Available pipelines
+
+| Pipeline | Classes | Use case |
+|---|---|---|
+| SQL Analyst | `SQLAnalystPipeline`, `AsyncSQLAnalystPipeline` | Natural language analytics over SQL databases |
+| List Classifier | `ListClassifierPipeline`, `AsyncListClassifierPipeline` | Map user text to one or more options from a list |
+
+### Quick examples
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.pipelines import SQLAnalystPipeline, ListClassifierPipeline
+
+sql_pipeline = SQLAnalystPipeline(kit=gpt.Chat(model="gpt-4o"))
+sql_result = sql_pipeline.run(
+    user_query="Top 5 products by revenue",
+    connection_string="postgresql://user:pass@localhost:5432/shop",
+)
+print(sql_result.answer)
+
+classifier = ListClassifierPipeline(
+    kit=gpt.Chat(model="gpt-4o-mini"),
+    options=["Billing", "Technical Support", "Sales"],
+)
+clf_result = classifier.run("I cannot update my payment method")
+print(clf_result.first)
+```
+
+### Full guides
+
+- [Pipelines overview](pipelines.md)
+- [SQL Analyst pipeline](pipelines/sql_analyst.md)
+- [List Classifier pipeline](pipelines/list_classifier.md)
 
 ---
 

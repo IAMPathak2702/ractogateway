@@ -34,6 +34,9 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 - [Fine-Tuning](#fine-tuning)
 - [MCP (Model Context Protocol)](#mcp-model-context-protocol)
 - [RAG — Retrieval-Augmented Generation](#rag)
+- [Prebuilt Pipelines](#prebuilt-pipelines)
+  - [SQLAnalystPipeline](#sqlanalystpipeline)
+  - [ListClassifierPipeline](#listclassifierpipeline)
 - [Performance & Cost Optimization](#performance--cost-optimization)
   - [Exact-Match Cache](#exact-match-cache)
   - [Semantic Cache](#semantic-cache)
@@ -2288,6 +2291,61 @@ for r in response.sources:
 | `clear` | `()` | `None` | Remove all indexed chunks |
 | `store` | (property) | `BaseVectorStore` | Access the underlying vector store |
 | `embedder` | (property) | `BaseEmbedder` | Access the underlying embedder |
+
+---
+
+## Prebuilt Pipelines
+
+RactoGateway includes prebuilt, production-focused pipeline classes for common
+LLM workflows.
+
+### SQLAnalystPipeline
+
+`SQLAnalystPipeline` (and `AsyncSQLAnalystPipeline`) handles:
+
+1. Natural language -> SQL generation
+2. SQL execution against your database
+3. Optional pandas/polars analysis step
+4. Optional markdown answer generation
+5. Optional deterministic chart generation
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.pipelines import SQLAnalystPipeline
+
+pipeline = SQLAnalystPipeline(kit=gpt.Chat(model="gpt-4o"), safe_mode=True)
+result = pipeline.run(
+    user_query="Top 5 products by quantity sold last month",
+    connection_string="postgresql://user:pass@localhost:5432/shop",
+)
+print(result.sql_query)
+print(result.answer)
+```
+
+### ListClassifierPipeline
+
+`ListClassifierPipeline` (and `AsyncListClassifierPipeline`) maps user text to
+the best matching option(s) from a list.
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.pipelines import ListClassifierPipeline
+
+classifier = ListClassifierPipeline(
+    kit=gpt.Chat(model="gpt-4o-mini"),
+    options=["Billing", "Technical Support", "Sales"],
+    selection_mode="single",
+    include_confidence=True,
+)
+result = classifier.run("I was charged twice for my plan")
+print(result.first, result.top_confidence)
+```
+
+For full usage patterns, configuration options, and async examples:
+
+- [Pipelines guide](docs/guide/pipelines.md)
+- [SQL Analyst pipeline guide](docs/guide/pipelines/sql_analyst.md)
+- [List Classifier pipeline guide](docs/guide/pipelines/list_classifier.md)
 
 ---
 

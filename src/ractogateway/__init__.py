@@ -22,6 +22,7 @@ if TYPE_CHECKING:
         mcp,
         ollama_developer_kit,
         openai_developer_kit,
+        pipelines,
         rag,
         redis,
         routing,
@@ -97,6 +98,27 @@ if TYPE_CHECKING:
     from ractogateway.redis.rate_limiter import RedisRateLimiter
     from ractogateway.routing._models import RoutingTier
     from ractogateway.routing.router import CostAwareRouter
+    from ractogateway.pipelines.sql_analyst._models import (
+        PipelineUsage,
+        RateLimitExceededError,
+        ReadOnlyViolationError,
+        SQLAnalystResult,
+    )
+    from ractogateway.pipelines.sql_analyst._viz import ChartSpec
+    from ractogateway.pipelines.sql_analyst.pipeline import (
+        AsyncSQLAnalystPipeline,
+        SQLAnalystPipeline,
+    )
+    from ractogateway.pipelines.list_classifier._models import (
+        AuditEntry,
+        ClassifierRateLimitExceededError,
+        ClassifierResult,
+        ClassifierUsage,
+    )
+    from ractogateway.pipelines.list_classifier.pipeline import (
+        AsyncListClassifierPipeline,
+        ListClassifierPipeline,
+    )
     from ractogateway.tools.registry import ToolRegistry, tool
     from ractogateway.truncation._models import TruncationConfig
     from ractogateway.truncation.truncator import TokenTruncator
@@ -113,6 +135,7 @@ _MODULE_EXPORTS: dict[str, str] = {
     "mcp": "ractogateway.mcp",
     "ollama_developer_kit": "ractogateway.ollama_developer_kit",
     "openai_developer_kit": "ractogateway.openai_developer_kit",
+    "pipelines": "ractogateway.pipelines",
     "rag": "ractogateway.rag",
     "redis": "ractogateway.redis",
     "routing": "ractogateway.routing",
@@ -221,6 +244,60 @@ _ATTR_EXPORTS: dict[str, tuple[str, str]] = {
     "BatchResult": ("ractogateway.batch._models", "BatchResult"),
     "BatchStatus": ("ractogateway.batch._models", "BatchStatus"),
     "OpenAIBatchProcessor": ("ractogateway.batch.openai_batch", "OpenAIBatchProcessor"),
+    # Pipelines — SQL Analyst
+    "AsyncSQLAnalystPipeline": (
+        "ractogateway.pipelines.sql_analyst.pipeline",
+        "AsyncSQLAnalystPipeline",
+    ),
+    "ChartSpec": (
+        "ractogateway.pipelines.sql_analyst._viz",
+        "ChartSpec",
+    ),
+    "PipelineUsage": (
+        "ractogateway.pipelines.sql_analyst._models",
+        "PipelineUsage",
+    ),
+    "RateLimitExceededError": (
+        "ractogateway.pipelines.sql_analyst._models",
+        "RateLimitExceededError",
+    ),
+    "ReadOnlyViolationError": (
+        "ractogateway.pipelines.sql_analyst._models",
+        "ReadOnlyViolationError",
+    ),
+    "SQLAnalystPipeline": (
+        "ractogateway.pipelines.sql_analyst.pipeline",
+        "SQLAnalystPipeline",
+    ),
+    "SQLAnalystResult": (
+        "ractogateway.pipelines.sql_analyst._models",
+        "SQLAnalystResult",
+    ),
+    # Pipelines — List Classifier
+    "AsyncListClassifierPipeline": (
+        "ractogateway.pipelines.list_classifier.pipeline",
+        "AsyncListClassifierPipeline",
+    ),
+    "AuditEntry": (
+        "ractogateway.pipelines.list_classifier._models",
+        "AuditEntry",
+    ),
+    "ClassifierRateLimitExceededError": (
+        "ractogateway.pipelines.list_classifier._models",
+        "ClassifierRateLimitExceededError",
+    ),
+    "ClassifierResult": (
+        "ractogateway.pipelines.list_classifier._models",
+        "ClassifierResult",
+    ),
+    "ClassifierUsage": (
+        "ractogateway.pipelines.list_classifier._models",
+        "ClassifierUsage",
+    ),
+    "ListClassifierPipeline": (
+        "ractogateway.pipelines.list_classifier.pipeline",
+        "ListClassifierPipeline",
+    ),
 }
 
 __all__ = [
@@ -314,6 +391,21 @@ __all__ = [
     "BatchResult",
     "BatchStatus",
     "OpenAIBatchProcessor",
+    # Pipelines — SQL Analyst
+    "AsyncSQLAnalystPipeline",
+    "ChartSpec",
+    "PipelineUsage",
+    "RateLimitExceededError",
+    "ReadOnlyViolationError",
+    "SQLAnalystPipeline",
+    "SQLAnalystResult",
+    # Pipelines — List Classifier
+    "AsyncListClassifierPipeline",
+    "AuditEntry",
+    "ClassifierRateLimitExceededError",
+    "ClassifierResult",
+    "ClassifierUsage",
+    "ListClassifierPipeline",
     # Submodules
     "anthropic_developer_kit",
     "batch",
@@ -326,6 +418,7 @@ __all__ = [
     "mcp",
     "ollama_developer_kit",
     "openai_developer_kit",
+    "pipelines",
     "rag",
     "redis",
     "routing",
