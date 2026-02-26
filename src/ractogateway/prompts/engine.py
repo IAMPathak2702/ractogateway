@@ -366,6 +366,13 @@ class RactoPrompt(BaseModel):
     anti_hallucination:
         When *True* (the default), the compiler appends explicit
         anti-hallucination directives at the end of the prompt.
+
+    Notes
+    -----
+    Legacy compatibility:
+        Older RactoGateway versions accepted ``instructions`` without the
+        full RACTO field set. That shape is still accepted and mapped to
+        ``aim`` with sensible defaults for missing RACTO fields.
     """
 
     role: str = Field(
@@ -416,6 +423,21 @@ class RactoPrompt(BaseModel):
     # ------------------------------------------------------------------
     # Validators
     # ------------------------------------------------------------------
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        payload = dict(data)
+        legacy_instructions = payload.pop("instructions", None)
+        if isinstance(legacy_instructions, str):
+            payload.setdefault("aim", legacy_instructions)
+            payload.setdefault("role", "You are a helpful assistant.")
+            payload.setdefault("constraints", ["Do not fabricate information."])
+            payload.setdefault("tone", "Clear and concise.")
+        return payload
 
     @model_validator(mode="after")
     def _validate_constraints_not_empty_strings(self) -> RactoPrompt:

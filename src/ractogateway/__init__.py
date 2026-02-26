@@ -9,6 +9,8 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
+from ractogateway._version import __version__
+
 if TYPE_CHECKING:
     from ractogateway import (
         anthropic_developer_kit,
@@ -315,6 +317,7 @@ __all__ = [
     "RactoGatewayAPIError",
     "RactoGatewayAuthError",
     "ResponseModelValidationError",
+    "__version__",
     # Fine-tuning
     "AnthropicFineTuner",
     "GeminiFineTuner",
@@ -424,9 +427,6 @@ __all__ = [
     "routing",
     "truncation",
 ]
-
-__version__ = "0.1.4"
-
 
 def __getattr__(name: str) -> Any:
     if name in _MODULE_EXPORTS:

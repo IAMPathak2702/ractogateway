@@ -99,7 +99,7 @@ _AUTH_MARKERS: frozenset[str] = frozenset(
 )
 
 
-def _wrap_provider_error(exc: Exception, provider: str) -> RactoGatewayError:
+def _wrap_provider_error(exc: Exception, provider: str) -> Exception:
     """Classify a raw provider SDK exception as a :class:`RactoGatewayError`.
 
     Uses type-name inspection so that provider packages (``openai``,
@@ -115,9 +115,16 @@ def _wrap_provider_error(exc: Exception, provider: str) -> RactoGatewayError:
 
     Returns
     -------
-    RactoGatewayError
-        The appropriate subclass with the original exception chained as cause.
+    Exception
+        A normalised :class:`RactoGatewayError` for provider-originated
+        exceptions, or the original exception when it is a plain built-in
+        Python error.
     """
+    # Preserve built-in exceptions (e.g. RuntimeError injected by tests or
+    # programmer errors) so they are not masked as provider API failures.
+    if type(exc).__module__ == "builtins":
+        return exc
+
     type_name = type(exc).__name__
     message = f"[{provider}] {exc}"
 

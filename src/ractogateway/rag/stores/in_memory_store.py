@@ -68,7 +68,9 @@ class InMemoryVectorStore(BaseVectorStore):
             chunk_embedding = chunk.embedding
             if chunk_embedding is None:
                 continue
-            scored.append((chunk, _cosine_similarity(embedding, chunk_embedding)))
+            raw_score = _cosine_similarity(embedding, chunk_embedding)
+            # Normalise cosine similarity from [-1, 1] to a non-negative relevance score.
+            scored.append((chunk, max(raw_score, 0.0)))
         scored.sort(key=lambda x: x[1], reverse=True)
         top = scored[:top_k]
 

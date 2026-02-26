@@ -94,9 +94,10 @@ class RactoRAG:
 
     def __init__(
         self,
-        vector_store: BaseVectorStore,
-        embedder: BaseEmbedder,
+        vector_store: BaseVectorStore | None = None,
+        embedder: BaseEmbedder | None = None,
         *,
+        store: BaseVectorStore | None = None,
         chunker: BaseChunker | None = None,
         processors: list[BaseProcessor] | None = None,
         llm_kit: Any | None = None,
@@ -104,7 +105,20 @@ class RactoRAG:
         reader_registry: FileReaderRegistry | None = None,
         default_prompt: RactoPrompt | None = None,
     ) -> None:
-        self._store = vector_store
+        if vector_store is not None and store is not None:
+            raise TypeError(
+                "Pass only one of 'vector_store' or legacy alias 'store', not both."
+            )
+        resolved_store = vector_store if vector_store is not None else store
+        if resolved_store is None:
+            raise TypeError(
+                "Missing required vector store. Pass 'vector_store=...' "
+                "(or legacy alias 'store=...')."
+            )
+        if embedder is None:
+            raise TypeError("Missing required embedder. Pass 'embedder=...'.")
+
+        self._store = resolved_store
         self._embedder = embedder
         self._chunker = chunker or RecursiveChunker(chunk_size=512, overlap=50)
         self._processors: list[BaseProcessor] = (

@@ -67,9 +67,10 @@ class FileReaderRegistry:
     def read(self, path: str | Path) -> Document:
         """Convenience method: detect reader and return a :class:`Document`."""
         p = Path(path)
+        reader = self.get_reader(p)
         if not p.exists():
             raise FileNotFoundError(f"File not found: {p}")
-        return self.get_reader(p).read(p)
+        return reader.read(p)
 
     @property
     def supported_extensions(self) -> frozenset[str]:

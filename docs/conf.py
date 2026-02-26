@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import warnings
 from pathlib import Path
@@ -25,12 +26,21 @@ PACKAGE_DIR = SRC_DIR / "ractogateway"
 GENERATED_MODULES_DIR = DOCS_DIR / "api" / "modules"
 sys.path.insert(0, str(SRC_DIR))
 
+
+def _load_version() -> str:
+    version_file = PACKAGE_DIR / "_version.py"
+    text = version_file.read_text(encoding="utf-8")
+    match = re.search(r'^__version__\s*=\s*"([^"]+)"', text, flags=re.MULTILINE)
+    if match is None:
+        raise RuntimeError(f"Unable to parse __version__ from {version_file}")
+    return match.group(1)
+
 # -- Project information -------------------------------------------------------
 project = "RactoGateway"
 author = "Ved Prakash Pathak"
 copyright = "2026, Ved Prakash Pathak"
-version = "0.1.4"
-release = "0.1.4"
+version = _load_version()
+release = version
 
 # -- General configuration -----------------------------------------------------
 extensions = [
