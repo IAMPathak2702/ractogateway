@@ -32,14 +32,23 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from ractogateway._models.chat import ChatConfig
 from ractogateway.prompts.engine import RactoPrompt
 from ractogateway.rag._models.document import Document
-from ractogateway.rag.page_index._bm25 import BM25Index, _DecisionIndex, extract_keywords
-from ractogateway.rag.page_index._models import PageEntry, PageIndexResponse, PageIndexResult
+from ractogateway.rag.page_index._bm25 import (
+    BM25Index,
+    _DecisionIndex,
+    extract_keywords,
+)
+from ractogateway.rag.page_index._models import (
+    PageEntry,
+    PageIndexResponse,
+    PageIndexResult,
+)
 from ractogateway.rag.processors.base import BaseProcessor
 from ractogateway.rag.processors.cleaner import TextCleaner
 from ractogateway.rag.readers.registry import FileReaderRegistry
@@ -78,6 +87,7 @@ _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)", re.MULTILINE)
 # Page splitter helpers
 # ---------------------------------------------------------------------------
 
+
 def _split_into_windows(
     text: str, page_size: int, page_overlap: int
 ) -> list[tuple[int | None, str]]:
@@ -103,7 +113,7 @@ def _detect_section_title(text: str) -> str | None:
 
 def _require_pypdf() -> Any:
     try:
-        import pypdf  # noqa: PLC0415
+        import pypdf
     except ImportError as exc:
         raise ImportError(
             "pypdf is required for page-aware PDF ingestion in PageIndexRAG. "
@@ -115,6 +125,7 @@ def _require_pypdf() -> Any:
 # ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
+
 
 class PageIndexRAG:
     """Vectorless RAG pipeline that indexes documents at the page level.
@@ -156,7 +167,7 @@ class PageIndexRAG:
         self,
         llm_kit: Any = None,
         *,
-        processors: list[BaseProcessor] | None = None,
+        processors: Sequence[BaseProcessor] | None = None,
         reader_registry: FileReaderRegistry | None = None,
         context_template: str = _DEFAULT_CONTEXT_TEMPLATE,
         default_prompt: RactoPrompt | None = None,
@@ -167,7 +178,9 @@ class PageIndexRAG:
         top_keywords: int = 20,
     ) -> None:
         self._llm_kit = llm_kit
-        self._processors: list[BaseProcessor] = processors if processors is not None else [TextCleaner()]
+        self._processors: list[BaseProcessor] = list(
+            processors if processors is not None else [TextCleaner()]
+        )
         self._reader_registry = reader_registry or FileReaderRegistry()
         self._context_template = context_template
         self._default_prompt = default_prompt or _DEFAULT_PAGE_RAG_PROMPT
@@ -176,7 +189,7 @@ class PageIndexRAG:
         self._top_keywords = top_keywords
 
         # In-process storage
-        self._entries: dict[str, PageEntry] = {}       # entry_id → PageEntry
+        self._entries: dict[str, PageEntry] = {}  # entry_id → PageEntry
         self._bm25 = BM25Index(k1=k1, b=b)
         self._decision = _DecisionIndex()
         self._doc_ids: set[str] = set()
@@ -240,7 +253,11 @@ class PageIndexRAG:
     def _build_context(self, results: list[PageIndexResult]) -> str:
         parts: list[str] = []
         for r in results:
-            page_label = f"p.{r.entry.page_number}" if r.entry.page_number else f"window {r.rank}"
+            page_label = (
+                f"p.{r.entry.page_number}"
+                if r.entry.page_number
+                else f"window {r.rank}"
+            )
             title = f" — {r.entry.section_title}" if r.entry.section_title else ""
             parts.append(
                 f"[{r.rank}] Source: {r.entry.source} ({page_label}){title}\n{r.entry.content}"
@@ -269,7 +286,8 @@ class PageIndexRAG:
         list[PageIndexResult]
             Pages ranked by BM25 score (most relevant first).
         """
-        from ractogateway.rag.page_index._bm25 import _tokenise  # noqa: PLC0415
+        from ractogateway.rag.page_index._bm25 import _tokenise
+
         query_terms = _tokenise(query)
         candidates = self._decision.candidates(query_terms)
         if not candidates:
@@ -280,7 +298,9 @@ class PageIndexRAG:
         for rank, (eid, score, matched) in enumerate(scored[:top_k], start=1):
             entry = self._entries[eid]
             results.append(
-                PageIndexResult(entry=entry, score=score, rank=rank, matched_terms=matched)
+                PageIndexResult(
+                    entry=entry, score=score, rank=rank, matched_terms=matched
+                )
             )
         return results
 
@@ -297,7 +317,7 @@ class PageIndexRAG:
     def _ingest_pdf(self, path: str, extra: dict[str, Any]) -> list[PageEntry]:
         doc_id = str(uuid.uuid4())
         self._doc_ids.add(doc_id)
-        raw_pages = [(pn, txt) for pn, txt in self._pages_from_pdf(path)]
+        raw_pages: list[tuple[int | None, str]] = list(self._pages_from_pdf(path))
         entries = self._build_entries(raw_pages, path, doc_id, extra)
         self._index_entries(entries)
         return entries
@@ -402,8 +422,9 @@ class PageIndexRAG:
                 continue
             try:
                 all_entries.extend(self.ingest(str(file_path), **metadata))
-            except Exception as exc:  # noqa: BLE001
-                import logging  # noqa: PLC0415
+            except Exception as exc:
+                import logging
+
                 logging.getLogger(__name__).warning(
                     "PageIndexRAG: skipping %s — %s", file_path, exc
                 )
