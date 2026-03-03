@@ -192,8 +192,13 @@ observability = [
 # pip install ractogateway[pipelines-sql]        — NL-to-SQL + pandas + answer
 # pip install ractogateway[pipelines-sql-viz]    — above + Plotly charts
 # pip install ractogateway[pipelines-sql-polars] — NL-to-SQL + Polars (fast, no pandas needed)
-# pip install ractogateway[pipelines-classifier] — List Classifier (no extra deps beyond core)
-# pip install ractogateway[pipelines]            — all pipelines bundled
+# pip install ractogateway[pipelines-classifier]           — List Classifier (no extra deps)
+# pip install ractogateway[pipelines-video]                — VideoProcessor core
+# pip install ractogateway[pipelines-video-whisper]        — + faster-whisper (local ASR)
+# pip install ractogateway[pipelines-video-openai-whisper] — + openai-whisper (local ASR)
+# pip install ractogateway[pipelines-video-yt]             — + yt-dlp (YouTube download)
+# pip install ractogateway[pipelines-video-full]           — video core + whisper + yt-dlp
+# pip install ractogateway[pipelines]                      — all pipelines bundled
 pipelines-sql = ["sqlalchemy>=2.0,<3.0", "pandas>=2.0,<3.0"]
 pipelines-sql-viz = [
     "sqlalchemy>=2.0,<3.0",
@@ -203,7 +208,32 @@ pipelines-sql-viz = [
 pipelines-sql-polars = ["sqlalchemy>=2.0,<3.0", "polars>=0.20,<2.0"]
 # List Classifier needs no extra deps — ships with every ractogateway install.
 pipelines-classifier = []
-pipelines = ["ractogateway[pipelines-sql]", "ractogateway[pipelines-classifier]"]
+# Video Processor — frame extraction, dedup, audio extraction, vision analysis
+pipelines-video = [
+    "opencv-python>=4.8,<5.0",
+    "imagehash>=4.3,<5.0",
+    "pillow>=10.0,<12.0",
+    "ffmpeg-python>=0.2,<1.0",
+    "scikit-image>=0.22,<2.0",
+    "numpy>=1.24,<3.0",
+    "httpx>=0.27,<1.0",
+]
+# Audio transcription backends (choose one or more)
+pipelines-video-whisper = ["faster-whisper>=1.0,<2.0"]
+pipelines-video-openai-whisper = ["openai-whisper>=20230918"]
+# YouTube download support via yt-dlp
+pipelines-video-yt = ["yt-dlp>=2024.1.1"]
+# Full video bundle: core + faster-whisper + YouTube
+pipelines-video-full = [
+    "ractogateway[pipelines-video]",
+    "ractogateway[pipelines-video-whisper]",
+    "ractogateway[pipelines-video-yt]",
+]
+pipelines = [
+    "ractogateway[pipelines-sql]",
+    "ractogateway[pipelines-classifier]",
+    "ractogateway[pipelines-video]",
+]
 
 dev = [
     "ractogateway[all]",
@@ -362,6 +392,42 @@ known-first-party = ["ractogateway"]
     "RUF100",
     "S110",
 ]
+# Video Processor pipeline — complex async/sync concurrency + many-branch dispatch
+"src/ractogateway/pipelines/video_processor/pipeline.py" = [
+    "B905",
+    "E501",
+    "PLR0912",
+    "PLR0915",
+    "RUF100",
+]
+"src/ractogateway/pipelines/video_processor/_extractor.py" = [
+    "E501",
+    "PLR0912",
+    "PLR0915",
+    "S603",
+]
+"src/ractogateway/pipelines/video_processor/_transcriber.py" = [
+    "E501",
+    "PLR0911",
+    "PLR0912",
+    "RUF100",
+    "S110",
+]
+"src/ractogateway/pipelines/video_processor/_analyzer.py" = [
+    "E501",
+    "PLR0912",
+    "RUF100",
+    "S110",
+]
+"src/ractogateway/pipelines/video_processor/_summarizer.py" = ["E501", "RUF100"]
+"src/ractogateway/pipelines/video_processor/_rag.py" = ["E501", "S110"]
+"src/ractogateway/pipelines/video_processor/_loader.py" = ["E501", "S108"]
+"tests/test_video_processor.py" = [
+    "E501",
+    "PLR2004",
+    "S101",
+    "I001",
+]
 
 [tool.mypy]
 python_version = "3.10"
@@ -431,6 +497,7 @@ ignore_errors = true
 module = [
     "ractogateway.pipelines.list_classifier.*",
     "ractogateway.pipelines.sql_analyst.*",
+    "ractogateway.pipelines.video_processor.*",
 ]
 ignore_errors = true
 

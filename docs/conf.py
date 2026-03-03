@@ -98,6 +98,19 @@ autodoc_mock_imports = [
     "mcp",
     "starlette",
     "uvicorn",
+    # Video Processor pipeline optional deps
+    "cv2",
+    "imagehash",
+    "ffmpeg",
+    "faster_whisper",
+    "whisper",
+    "skimage",
+    "httpx",
+    "yt_dlp",
+    "groq",
+    "deepgram",
+    "transformers",
+    "torch",
 ]
 
 # autodoc options

@@ -17,6 +17,15 @@ Available pipelines
   confidence scores, reasoning, retries, memory, rate limiting, and telemetry.
   No extra dependencies — works with any installed provider kit.
 
+- :class:`VideoProcessorPipeline` / :class:`AsyncVideoProcessorPipeline` —
+  Process tutorial/lecture videos: frame deduplication, audio transcription,
+  vision-LLM analysis (whiteboard / screen), comprehensive summary, optional
+  RAG storage.  Accepts local paths, URLs, YouTube links, raw bytes, or
+  pre-extracted frame images.
+  Requires: ``pip install ractogateway[pipelines-video]``
+  Audio:    ``pip install ractogateway[pipelines-video-whisper]``
+  YouTube:  ``pip install ractogateway[pipelines-video-yt]``
+
 Usage::
 
     from ractogateway.pipelines import SQLAnalystPipeline, ListClassifierPipeline
@@ -42,8 +51,37 @@ Usage::
     print(result.first)           # "Account Management"
     print(result.top_confidence)  # 0.94
     print(result.as_dict())       # {"selected": [...], "confidences": [...], ...}
+
+    # Video Processor
+    from ractogateway.pipelines import VideoProcessorPipeline, TranscriberBackend
+    vp = VideoProcessorPipeline(
+        kit=Chat(model="gpt-4o"),
+        fps=1.0,
+        similarity_threshold=85.0,
+        transcriber=TranscriberBackend.FASTER_WHISPER,
+        transcriber_model="base",
+        generate_summary=True,
+    )
+    res = vp.run("lecture.mp4")       # or YouTube URL / bytes / pre-extracted frames
+    print(res.summary)
+    res.to_markdown("report.md")
 """
 
+from ractogateway.pipelines.video_processor import (
+    AsyncVideoProcessorPipeline,
+    DeduplicationMethod,
+    FrameAnalysisMode,
+    FrameEntry,
+    TranscriberBackend,
+    TranscriptSegment,
+    VideoConfig,
+    VideoInput,
+    VideoProcessorPipeline,
+    VideoProcessorResult,
+    VideoProcessorUsage,
+    VideoRateLimitExceededError,
+    VideoSection,
+)
 from ractogateway.pipelines.list_classifier import (
     AsyncListClassifierPipeline,
     AuditEntry,
@@ -82,4 +120,18 @@ __all__ = [
     "ClassifierResult",
     "ClassifierUsage",
     "ListClassifierPipeline",
+    # Video Processor
+    "AsyncVideoProcessorPipeline",
+    "DeduplicationMethod",
+    "FrameAnalysisMode",
+    "FrameEntry",
+    "TranscriberBackend",
+    "TranscriptSegment",
+    "VideoConfig",
+    "VideoInput",
+    "VideoProcessorPipeline",
+    "VideoProcessorResult",
+    "VideoProcessorUsage",
+    "VideoRateLimitExceededError",
+    "VideoSection",
 ]
