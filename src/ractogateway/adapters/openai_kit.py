@@ -140,6 +140,11 @@ class OpenAILLMKit(BaseLLMAdapter):
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens,
             }
+            details = getattr(response.usage, "completion_tokens_details", None)
+            if details:
+                rt = getattr(details, "reasoning_tokens", 0) or 0
+                if rt:
+                    usage["reasoning_tokens"] = rt
 
         return self._build_response(
             content=content,
@@ -226,6 +231,8 @@ class OpenAILLMKit(BaseLLMAdapter):
         max_tokens: int = 4096,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        kwargs.pop("native_thinking", None)
+        kwargs.pop("thinking_budget", None)
         _atts = list(kwargs.pop("attachments", None) or [])
         messages = prompt.to_messages(user_message, attachments=_atts, provider="openai")
         if history:

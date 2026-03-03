@@ -27,6 +27,8 @@ guide/huggingface
 guide/streaming
 guide/tools
 guide/embeddings
+guide/chain_of_thought
+guide/native_thinking
 guide/finetune
 guide/rag
 guide/pipelines

@@ -15,6 +15,8 @@ openai_kit
 google_kit
 anthropic_kit
 finetune
+chain_of_thought
+native_thinking
 rag
 cache
 routing

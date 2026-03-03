@@ -141,6 +141,7 @@ class GoogleLLMKit(BaseLLMAdapter):
     def _normalise(self, response: Any) -> LLMResponse:
         # google-genai response: response.text, response.candidates, etc.
         content: str | None = None
+        thinking: str | None = None
         tool_calls: list[ToolCallResult] = []
         finish = FinishReason.STOP
 
@@ -148,9 +149,13 @@ class GoogleLLMKit(BaseLLMAdapter):
         if candidate:
             parts = candidate.content.parts if candidate.content else []
             text_parts: list[str] = []
+            thinking_parts: list[str] = []
 
             for part in parts:
-                if part.text:
+                if getattr(part, "thought", False):
+                    if part.text:
+                        thinking_parts.append(part.text)
+                elif part.text:
                     text_parts.append(part.text)
                 if part.function_call:
                     fc = part.function_call
@@ -165,6 +170,8 @@ class GoogleLLMKit(BaseLLMAdapter):
 
             if text_parts:
                 content = "\n".join(text_parts)
+            if thinking_parts:
+                thinking = "\n".join(thinking_parts)
             if tool_calls:
                 finish = FinishReason.TOOL_CALL
 
@@ -180,6 +187,7 @@ class GoogleLLMKit(BaseLLMAdapter):
 
         return self._build_response(
             content=content,
+            thinking=thinking,
             tool_calls=tool_calls,
             finish_reason=finish,
             usage=usage,
@@ -278,10 +286,18 @@ class GoogleLLMKit(BaseLLMAdapter):
         max_tokens: int = 4096,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        native_thinking = bool(kwargs.pop("native_thinking", False))
+        thinking_budget = int(kwargs.pop("thinking_budget", 10000))
         config: dict[str, Any] = {
             "temperature": temperature,
             "max_output_tokens": max_tokens,
         }
+        if native_thinking:
+            try:
+                from google.genai import types as _gt
+                config["thinking_config"] = _gt.ThinkingConfig(thinking_budget=thinking_budget)
+            except (AttributeError, ImportError):
+                config["thinking_config"] = {"thinking_budget": thinking_budget}
         if tools and len(tools) > 0:
             config["tools"] = self.translate_tools(tools)
         config.update(kwargs)

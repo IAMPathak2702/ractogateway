@@ -224,6 +224,9 @@ class OpenAIDeveloperKit:
         """
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -289,6 +292,8 @@ class OpenAIDeveloperKit:
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
                 attachments=config.attachments,
+                native_thinking=config.native_thinking,
+                thinking_budget=config.thinking_budget,
                 **config.extra,
             )
             return validate_and_retry(
@@ -388,6 +393,9 @@ class OpenAIDeveloperKit:
         """Async chat completion with optional middleware pipeline."""
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -452,6 +460,8 @@ class OpenAIDeveloperKit:
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
                 attachments=config.attachments,
+                native_thinking=config.native_thinking,
+                thinking_budget=config.thinking_budget,
                 **config.extra,
             )
             return await async_validate_and_retry(
@@ -565,6 +575,9 @@ class OpenAIDeveloperKit:
         """
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -583,6 +596,8 @@ class OpenAIDeveloperKit:
             temperature=config.temperature,
             max_tokens=config.max_tokens,
             attachments=config.attachments,
+            native_thinking=config.native_thinking,
+            thinking_budget=config.thinking_budget,
             **config.extra,
         )
         request["stream"] = True
@@ -674,6 +689,9 @@ class OpenAIDeveloperKit:
         """Async streaming — yields ``StreamChunk`` objects."""
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -692,6 +710,8 @@ class OpenAIDeveloperKit:
             temperature=config.temperature,
             max_tokens=config.max_tokens,
             attachments=config.attachments,
+            native_thinking=config.native_thinking,
+            thinking_budget=config.thinking_budget,
             **config.extra,
         )
         request["stream"] = True
@@ -891,6 +911,11 @@ class OpenAIDeveloperKit:
                     "completion_tokens": event.usage.completion_tokens,
                     "total_tokens": event.usage.total_tokens,
                 }
+                details = getattr(event.usage, "completion_tokens_details", None)
+                if details:
+                    rt = getattr(details, "reasoning_tokens", 0) or 0
+                    if rt:
+                        usage["reasoning_tokens"] = rt
             return StreamChunk(
                 accumulated_text=accumulated,
                 finish_reason=FinishReason.STOP,

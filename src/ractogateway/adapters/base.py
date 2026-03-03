@@ -59,6 +59,14 @@ class LLMResponse(BaseModel):
         default=None,
         description="The text content of the response (cleaned of markdown fences).",
     )
+    thinking: str | None = Field(
+        default=None,
+        description=(
+            "Native model reasoning / thinking text. "
+            "Populated when ``ChatConfig.native_thinking=True`` and the model supports it. "
+            "Anthropic: extended thinking block. Google: thought parts."
+        ),
+    )
     parsed: dict[str, Any] | list[Any] | None = Field(
         default=None,
         description="Auto-parsed JSON when the response is valid JSON.",
@@ -197,6 +205,7 @@ class BaseLLMAdapter(ABC):
         self,
         *,
         content: str | None = None,
+        thinking: str | None = None,
         tool_calls: list[ToolCallResult] | None = None,
         finish_reason: FinishReason = FinishReason.STOP,
         usage: dict[str, int] | None = None,
@@ -210,6 +219,7 @@ class BaseLLMAdapter(ABC):
 
         return LLMResponse(
             content=content,
+            thinking=thinking,
             parsed=parsed,
             tool_calls=tool_calls or [],
             finish_reason=finish_reason,

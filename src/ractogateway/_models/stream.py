@@ -13,6 +13,7 @@ class StreamDelta(BaseModel):
     """Incremental content produced by a single streaming event."""
 
     text: str = ""
+    thinking: str = ""
     tool_call_id: str | None = None
     tool_call_name: str | None = None
     tool_call_args_fragment: str | None = None
@@ -44,6 +45,8 @@ class StreamChunk(BaseModel):
 
     delta: StreamDelta = Field(default_factory=StreamDelta)
     accumulated_text: str = ""
+    accumulated_thinking: str = ""
+    is_thinking: bool = False
     finish_reason: FinishReason | None = None
     tool_calls: list[ToolCallResult] = Field(default_factory=list)
     usage: dict[str, int] = Field(default_factory=dict)

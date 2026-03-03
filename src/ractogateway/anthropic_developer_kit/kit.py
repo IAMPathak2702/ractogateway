@@ -192,6 +192,9 @@ class AnthropicDeveloperKit:
         """
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -257,6 +260,8 @@ class AnthropicDeveloperKit:
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
                 attachments=config.attachments,
+                native_thinking=config.native_thinking,
+                thinking_budget=config.thinking_budget,
                 **config.extra,
             )
             return validate_and_retry(
@@ -356,6 +361,9 @@ class AnthropicDeveloperKit:
         """Async chat completion with optional middleware pipeline."""
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -420,6 +428,8 @@ class AnthropicDeveloperKit:
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
                 attachments=config.attachments,
+                native_thinking=config.native_thinking,
+                thinking_budget=config.thinking_budget,
                 **config.extra,
             )
             return await async_validate_and_retry(
@@ -533,6 +543,9 @@ class AnthropicDeveloperKit:
         """
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -551,11 +564,15 @@ class AnthropicDeveloperKit:
             temperature=config.temperature,
             max_tokens=config.max_tokens,
             attachments=config.attachments,
+            native_thinking=config.native_thinking,
+            thinking_budget=config.thinking_budget,
             **config.extra,
         )
 
         accumulated = ""
+        accumulated_thinking = ""
         tc_acc: dict[int, dict[str, Any]] = {}
+        thinking_indices: set[int] = set()
         finish_reason = FinishReason.STOP
         usage: dict[str, int] = {}
         _span_recorded = False
@@ -566,12 +583,15 @@ class AnthropicDeveloperKit:
                     chunk = self._process_anthropic_event(
                         event,
                         accumulated,
+                        accumulated_thinking,
                         tc_acc,
+                        thinking_indices,
                         finish_reason,
                         usage,
                     )
                     if chunk is not None:
                         accumulated = chunk.accumulated_text
+                        accumulated_thinking = chunk.accumulated_thinking
                         if chunk.finish_reason is not None:
                             finish_reason = chunk.finish_reason
                         if chunk.usage:
@@ -652,6 +672,9 @@ class AnthropicDeveloperKit:
         """Async streaming via Anthropic's async ``messages.stream()``."""
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -670,11 +693,15 @@ class AnthropicDeveloperKit:
             temperature=config.temperature,
             max_tokens=config.max_tokens,
             attachments=config.attachments,
+            native_thinking=config.native_thinking,
+            thinking_budget=config.thinking_budget,
             **config.extra,
         )
 
         accumulated = ""
+        accumulated_thinking = ""
         tc_acc: dict[int, dict[str, Any]] = {}
+        thinking_indices: set[int] = set()
         finish_reason = FinishReason.STOP
         usage: dict[str, int] = {}
         _span_recorded = False
@@ -685,12 +712,15 @@ class AnthropicDeveloperKit:
                     chunk = self._process_anthropic_event(
                         event,
                         accumulated,
+                        accumulated_thinking,
                         tc_acc,
+                        thinking_indices,
                         finish_reason,
                         usage,
                     )
                     if chunk is not None:
                         accumulated = chunk.accumulated_text
+                        accumulated_thinking = chunk.accumulated_thinking
                         if chunk.finish_reason is not None:
                             finish_reason = chunk.finish_reason
                         if chunk.usage:
@@ -775,7 +805,9 @@ class AnthropicDeveloperKit:
     def _process_anthropic_event(
         event: Any,
         accumulated: str,
+        accumulated_thinking: str,
         tc_acc: dict[int, dict[str, Any]],
+        thinking_indices: set[int],
         finish_reason: FinishReason,
         usage: dict[str, int],
     ) -> StreamChunk | None:
@@ -783,7 +815,9 @@ class AnthropicDeveloperKit:
 
         if etype == "content_block_start":
             block = event.content_block
-            if block.type == "tool_use":
+            if block.type == "thinking":
+                thinking_indices.add(event.index)
+            elif block.type == "tool_use":
                 tc_acc[event.index] = {
                     "id": block.id,
                     "name": block.name,
@@ -791,17 +825,29 @@ class AnthropicDeveloperKit:
                 }
             return StreamChunk(
                 accumulated_text=accumulated,
+                accumulated_thinking=accumulated_thinking,
                 raw=event,
             )
 
         if etype == "content_block_delta":
             delta = event.delta
+            if delta.type == "thinking_delta":
+                thinking_text = delta.thinking
+                accumulated_thinking += thinking_text
+                return StreamChunk(
+                    delta=StreamDelta(thinking=thinking_text),
+                    accumulated_text=accumulated,
+                    accumulated_thinking=accumulated_thinking,
+                    is_thinking=True,
+                    raw=event,
+                )
             if delta.type == "text_delta":
                 text = delta.text
                 accumulated += text
                 return StreamChunk(
                     delta=StreamDelta(text=text),
                     accumulated_text=accumulated,
+                    accumulated_thinking=accumulated_thinking,
                     raw=event,
                 )
             if delta.type == "input_json_delta":
@@ -813,6 +859,7 @@ class AnthropicDeveloperKit:
                         tool_call_args_fragment=delta.partial_json,
                     ),
                     accumulated_text=accumulated,
+                    accumulated_thinking=accumulated_thinking,
                     raw=event,
                 )
             return None
@@ -831,6 +878,7 @@ class AnthropicDeveloperKit:
                 }
             return StreamChunk(
                 accumulated_text=accumulated,
+                accumulated_thinking=accumulated_thinking,
                 finish_reason=fr,
                 usage=u,
                 raw=event,
@@ -839,6 +887,7 @@ class AnthropicDeveloperKit:
         if etype == "message_stop":
             return StreamChunk(
                 accumulated_text=accumulated,
+                accumulated_thinking=accumulated_thinking,
                 finish_reason=finish_reason,
                 tool_calls=_flush_tool_calls(tc_acc),
                 usage=usage,

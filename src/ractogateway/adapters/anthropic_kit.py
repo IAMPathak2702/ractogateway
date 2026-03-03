@@ -96,10 +96,13 @@ class AnthropicLLMKit(BaseLLMAdapter):
 
     def _normalise(self, response: Any) -> LLMResponse:
         text_parts: list[str] = []
+        thinking_parts: list[str] = []
         tool_calls: list[ToolCallResult] = []
 
         for block in response.content:
-            if block.type == "text":
+            if block.type == "thinking":
+                thinking_parts.append(block.thinking)
+            elif block.type == "text":
                 text_parts.append(block.text)
             elif block.type == "tool_use":
                 tool_calls.append(
@@ -111,6 +114,7 @@ class AnthropicLLMKit(BaseLLMAdapter):
                 )
 
         content = "\n".join(text_parts) if text_parts else None
+        thinking = "\n".join(thinking_parts) if thinking_parts else None
 
         # Usage
         usage: dict[str, int] = {}
@@ -123,6 +127,7 @@ class AnthropicLLMKit(BaseLLMAdapter):
 
         return self._build_response(
             content=content,
+            thinking=thinking,
             tool_calls=tool_calls,
             finish_reason=self._map_finish_reason(response.stop_reason),
             usage=usage,
@@ -206,6 +211,8 @@ class AnthropicLLMKit(BaseLLMAdapter):
         max_tokens: int = 4096,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        native_thinking = bool(kwargs.pop("native_thinking", False))
+        thinking_budget = int(kwargs.pop("thinking_budget", 10000))
         system_prompt = prompt.compile()
         _atts = list(kwargs.pop("attachments", None) or [])
         _tmp = prompt.to_messages(user_message, attachments=_atts, provider="anthropic")
@@ -215,13 +222,17 @@ class AnthropicLLMKit(BaseLLMAdapter):
             if history
             else []
         )
+        # Anthropic requires temperature=1 when extended thinking is enabled.
+        effective_temperature = 1 if native_thinking else temperature
         request: dict[str, Any] = {
             "model": self.model,
             "system": system_prompt,
             "messages": [*history_msgs, {"role": "user", "content": user_content}],
-            "temperature": temperature,
+            "temperature": effective_temperature,
             "max_tokens": max_tokens,
         }
+        if native_thinking:
+            request["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
         if tools and len(tools) > 0:
             request["tools"] = self.translate_tools(tools)
         request.update(kwargs)

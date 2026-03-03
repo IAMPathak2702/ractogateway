@@ -198,6 +198,9 @@ class OllamaDeveloperKit:
         """
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -354,6 +357,9 @@ class OllamaDeveloperKit:
         """Async chat completion with optional middleware pipeline."""
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -520,6 +526,9 @@ class OllamaDeveloperKit:
         """
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -626,6 +635,9 @@ class OllamaDeveloperKit:
         """Async streaming — yields ``StreamChunk`` objects."""
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)

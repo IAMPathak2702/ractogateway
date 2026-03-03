@@ -185,6 +185,9 @@ class GoogleDeveloperKit:
         """
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -250,6 +253,8 @@ class GoogleDeveloperKit:
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
                 attachments=config.attachments,
+                native_thinking=config.native_thinking,
+                thinking_budget=config.thinking_budget,
                 **config.extra,
             )
             return validate_and_retry(
@@ -349,6 +354,9 @@ class GoogleDeveloperKit:
         """Async chat completion with optional middleware pipeline."""
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -413,6 +421,8 @@ class GoogleDeveloperKit:
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
                 attachments=config.attachments,
+                native_thinking=config.native_thinking,
+                thinking_budget=config.thinking_budget,
                 **config.extra,
             )
             return await async_validate_and_retry(
@@ -526,6 +536,9 @@ class GoogleDeveloperKit:
 
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -536,6 +549,8 @@ class GoogleDeveloperKit:
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
+            native_thinking=config.native_thinking,
+            thinking_budget=config.thinking_budget,
             **config.extra,
         )
         history_turns: list[ChatTurn] | None = (
@@ -548,6 +563,7 @@ class GoogleDeveloperKit:
         )
 
         accumulated = ""
+        accumulated_thinking = ""
         tool_calls: list[ToolCallResult] = []
         _span_recorded = False
 
@@ -563,9 +579,11 @@ class GoogleDeveloperKit:
                 chunk = self._process_gemini_event(
                     event,
                     accumulated,
+                    accumulated_thinking,
                     tool_calls,
                 )
                 accumulated = chunk.accumulated_text
+                accumulated_thinking = chunk.accumulated_thinking
                 if chunk.is_final and validation_config.response_model is not None:
                     chunk.parsed = validate_stream_final(
                         chunk.accumulated_text,
@@ -645,6 +663,9 @@ class GoogleDeveloperKit:
 
         t0 = time.perf_counter()
         prompt = self._resolve_prompt(config)
+        if config.chain_of_thought:
+            from ractogateway._cot import apply_chain_of_thought
+            prompt = apply_chain_of_thought(prompt)
         model = self._resolve_model(config.user_message)
         config = self._apply_truncation(config, model)
         validation_config = with_inferred_response_model(config, prompt)
@@ -655,6 +676,8 @@ class GoogleDeveloperKit:
             tools=config.tools,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
+            native_thinking=config.native_thinking,
+            thinking_budget=config.thinking_budget,
             **config.extra,
         )
         history_turns: list[ChatTurn] | None = (
@@ -667,6 +690,7 @@ class GoogleDeveloperKit:
         )
 
         accumulated = ""
+        accumulated_thinking = ""
         tool_calls: list[ToolCallResult] = []
         _span_recorded = False
 
@@ -682,9 +706,11 @@ class GoogleDeveloperKit:
                 chunk = self._process_gemini_event(
                     event,
                     accumulated,
+                    accumulated_thinking,
                     tool_calls,
                 )
                 accumulated = chunk.accumulated_text
+                accumulated_thinking = chunk.accumulated_thinking
                 if chunk.is_final and validation_config.response_model is not None:
                     chunk.parsed = validate_stream_final(
                         chunk.accumulated_text,
@@ -879,15 +905,20 @@ class GoogleDeveloperKit:
     def _process_gemini_event(
         event: Any,
         accumulated: str,
+        accumulated_thinking: str,
         tool_calls: list[ToolCallResult],
     ) -> StreamChunk:
         text_delta = ""
+        thinking_delta = ""
 
         if event.candidates:
             candidate = event.candidates[0]
             if candidate.content and candidate.content.parts:
                 for part in candidate.content.parts:
-                    if part.text:
+                    if getattr(part, "thought", False):
+                        if part.text:
+                            thinking_delta += part.text
+                    elif part.text:
                         text_delta += part.text
                     if part.function_call:
                         fc = part.function_call
@@ -900,6 +931,7 @@ class GoogleDeveloperKit:
                         )
 
         accumulated += text_delta
+        accumulated_thinking += thinking_delta
         is_last = bool(event.candidates and event.candidates[0].finish_reason is not None)
 
         usage: dict[str, int] = {}
@@ -912,10 +944,13 @@ class GoogleDeveloperKit:
             }
 
         finish = (FinishReason.TOOL_CALL if tool_calls else FinishReason.STOP) if is_last else None
+        is_thinking_chunk = bool(thinking_delta) and not text_delta
 
         return StreamChunk(
-            delta=StreamDelta(text=text_delta),
+            delta=StreamDelta(text=text_delta, thinking=thinking_delta),
             accumulated_text=accumulated,
+            accumulated_thinking=accumulated_thinking,
+            is_thinking=is_thinking_chunk,
             finish_reason=finish,
             tool_calls=tool_calls if is_last else [],
             usage=usage,

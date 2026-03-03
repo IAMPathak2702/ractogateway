@@ -27,6 +27,8 @@ Components
 from ractogateway.rag import chunkers, embedders, processors, readers, stores
 from ractogateway.rag._models.document import Chunk, ChunkMetadata, Document
 from ractogateway.rag._models.retrieval import RAGResponse, RetrievalConfig, RetrievalResult
+from ractogateway.rag.page_index import PageIndexRAG
+from ractogateway.rag.page_index._models import PageEntry, PageIndexResponse, PageIndexResult
 from ractogateway.rag.chunkers.fixed_chunker import FixedChunker
 from ractogateway.rag.chunkers.recursive_chunker import RecursiveChunker
 from ractogateway.rag.chunkers.semantic_chunker import SemanticChunker
@@ -49,8 +51,13 @@ from ractogateway.rag.stores.qdrant_store import QdrantStore
 from ractogateway.rag.stores.weaviate_store import WeaviateStore
 
 __all__ = [
-    # Pipeline
+    # Pipelines
     "RactoRAG",
+    "PageIndexRAG",
+    # PageIndex models
+    "PageEntry",
+    "PageIndexResult",
+    "PageIndexResponse",
     # Models
     "Chunk",
     "ChunkMetadata",

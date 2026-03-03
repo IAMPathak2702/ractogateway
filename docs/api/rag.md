@@ -156,6 +156,30 @@
    :show-inheritance:
 ```
 
+## PageIndexRAG — Vectorless BM25 Pipeline
+
+```{eval-rst}
+.. autoclass:: ractogateway.rag.page_index.pipeline.PageIndexRAG
+   :members:
+   :show-inheritance:
+```
+
+## PageIndex Models
+
+```{eval-rst}
+.. automodule:: ractogateway.rag.page_index._models
+   :members:
+   :show-inheritance:
+```
+
+## PageIndex BM25 Engine
+
+```{eval-rst}
+.. automodule:: ractogateway.rag.page_index._bm25
+   :members:
+   :show-inheritance:
+```
+
 ## Stores
 
 ```{eval-rst}

@@ -20,20 +20,21 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 - [5-Line Quick Start](#5-line-quick-start)
 - [RACTO Prompt Engine](#racto-prompt-engine)
 - [Developer Kits](#developer-kits)
-  - [Ollama — Local Models, Zero API Key](#ollama--run-any-model-locally-zero-api-key)
-  - [HuggingFace — Cloud and Local TGI / vLLM](#huggingface--cloud-inference-api--local-tgi--vllm)
+  - [Ollama — Run Any Model Locally, Zero API Key](#ollama--run-any-model-locally-zero-api-key)
+  - [HuggingFace — Cloud Inference API + Local TGI / vLLM](#huggingface--cloud-inference-api--local-tgi--vllm)
 - [Streaming](#streaming)
 - [Async Support](#async-support)
 - [Embeddings](#embeddings)
 - [Tool Calling](#tool-calling)
 - [Validated Response Models](#validated-response-models)
 - [Multi-turn Conversations](#multi-turn-conversations)
+- [Chain of Thoughts](#chain-of-thoughts)
 - [Multimodal Attachments — Images & Files](#multimodal-attachments)
 - [Low-Level Gateway](#low-level-gateway)
 - [Switching Providers](#switching-providers)
 - [Fine-Tuning](#fine-tuning)
-- [MCP (Model Context Protocol)](#mcp-model-context-protocol)
 - [RAG — Retrieval-Augmented Generation](#rag)
+  - [PageIndexRAG — Vectorless BM25 RAG](#pageindexrag--vectorless-bm25-rag)
 - [Prebuilt Pipelines](#prebuilt-pipelines)
   - [SQLAnalystPipeline](#sqlanalystpipeline)
   - [ListClassifierPipeline](#listclassifierpipeline)
@@ -44,6 +45,7 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
   - [Token Truncation](#token-truncation)
   - [Batch Processing](#batch-processing)
   - [Combining All Optimizations](#combining-all-optimizations)
+- [MCP (Model Context Protocol)](#mcp-model-context-protocol)
 - [Redis Infrastructure](#redis-infrastructure)
   - [RedisExactCache — Distributed Response Cache](#redisexactcache--distributed-response-cache)
   - [RedisRateLimiter — Fleet-Wide Rate Limiting](#redisratelimiter--fleet-wide-rate-limiting)
@@ -70,7 +72,9 @@ RactoGateway solves this by providing:
 - **Automatic JSON parsing** — responses are cleaned of markdown fences and auto-parsed
 - **Unified tool calling** — define tools once as Python functions, use them with any provider
 - **Streaming with typed chunks** — every `StreamChunk` has `.delta.text`, `.accumulated_text`, `.is_final`, `.usage`
+- **Chain of Thoughts** — `ChatConfig(chain_of_thought=True)` injects step-by-step reasoning into the system prompt across all five provider kits
 - **RAG pipeline** — ingest files, embed, store, retrieve, and generate answers with one class
+- **PageIndexRAG** — vectorless, page-level BM25 RAG; no embedding API, no vector store — pure Python decision-tree + Okapi BM25 retrieval
 - **Low-level Gateway** — wraps any adapter for direct prompt execution without `ChatConfig`
 - **Exact-match cache** — SHA-256 LRU cache eliminates duplicate API calls with zero latency
 - **Semantic cache** — cosine-similarity cache returns cached answers for semantically equivalent queries
@@ -1153,6 +1157,67 @@ r2 = kit.chat(gpt.ChatConfig(
 print(r2.content)
 # "def reverse_string(s: str | None) -> str | None:\n    if s is None:\n        return None\n    return s[::-1]"
 ```
+
+---
+
+## Chain of Thoughts
+
+Set `chain_of_thought=True` on any `ChatConfig` to make the model reason step by step before answering. A chain-of-thought constraint is appended to the compiled system prompt automatically — no adapter changes, works identically across all five kits.
+
+```python
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
+
+prompt = RactoPrompt(
+    role="You are a maths tutor.",
+    aim="Solve the problem the student gives you.",
+    constraints=["Show every calculation step.", "Use plain English."],
+    tone="Patient and encouraging",
+    output_format="text",
+)
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt)
+
+# Without CoT — model may jump straight to the answer
+r = kit.chat(gpt.ChatConfig(user_message="What is 17 × 23?"))
+
+# With CoT — model reasons aloud before concluding
+r = kit.chat(gpt.ChatConfig(
+    user_message="What is 17 × 23?",
+    chain_of_thought=True,
+))
+print(r.content)
+# "Step 1: Break 17 × 23 into (17 × 20) + (17 × 3).
+#  Step 2: 17 × 20 = 340.
+#  Step 3: 17 × 3 = 51.
+#  Step 4: 340 + 51 = 391.
+#  Answer: 391."
+```
+
+Works the same way with every kit — swap `gpt` for `claude`, `gemini`, `local` (Ollama), or `hf` (HuggingFace):
+
+```python
+from ractogateway import anthropic_developer_kit as claude
+
+kit = claude.Chat(model="claude-opus-4-6", default_prompt=prompt)
+r = kit.chat(claude.ChatConfig(
+    user_message="Explain why the sky is blue.",
+    chain_of_thought=True,
+    temperature=0.3,   # higher temperature gives richer reasoning traces
+))
+```
+
+**`chain_of_thought` appended constraint:**
+
+> *"Before answering, reason through the problem step by step. State each reasoning step clearly and explicitly, then conclude with your final answer."*
+
+This constraint is added **last** in the `[CONSTRAINTS]` section so it never overrides caller-defined rules. The original `RactoPrompt` is never mutated — a copy is created per call.
+
+**`ChatConfig` fields relevant to CoT:**
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `chain_of_thought` | `bool` | `False` | Inject step-by-step reasoning instruction into system prompt |
+| `temperature` | `float` | `0.0` | Raise to `0.3–0.7` for more expressive reasoning traces |
+| `max_tokens` | `int` | `4096` | Increase if CoT produces long intermediate steps |
 
 ---
 
@@ -2291,6 +2356,130 @@ for r in response.sources:
 | `clear` | `()` | `None` | Remove all indexed chunks |
 | `store` | (property) | `BaseVectorStore` | Access the underlying vector store |
 | `embedder` | (property) | `BaseEmbedder` | Access the underlying embedder |
+
+---
+
+### PageIndexRAG — Vectorless BM25 RAG
+
+`PageIndexRAG` is an alternative RAG pipeline that requires **no embedding model** and **no vector store**. It indexes documents at the **page level** and retrieves using a two-stage decision-tree approach:
+
+```text
+Document → Read → Split into Pages → Extract Keywords → Decision Index
+                                                              ↓
+                              Query → Tokenise → Candidate Selection (Decision Tree)
+                                                      ↓
+                                              BM25 Scoring → Top-K Pages → Generate
+```
+
+**When to use `PageIndexRAG` vs `RactoRAG`:**
+
+| | `RactoRAG` | `PageIndexRAG` |
+| --- | --- | --- |
+| Requires embedding API | Yes | **No** |
+| Requires vector store | Yes | **No** |
+| Extra dependencies | Provider SDK | **None** (pure Python) |
+| Best for | Semantic / conceptual queries | Keyword-rich exact-term queries |
+| Granularity | Configurable chunks | Full pages |
+| PDF page awareness | Via `ChunkMetadata.page` | Native page-by-page extraction |
+| Setup complexity | Medium | **Minimal** |
+
+#### Quick Start
+
+```python
+from ractogateway.rag.page_index import PageIndexRAG
+from ractogateway import openai_developer_kit as gpt
+
+kit = gpt.Chat(model="gpt-4o", default_prompt=my_prompt)
+rag = PageIndexRAG(llm_kit=kit)   # no embedder, no store needed
+
+# PDFs → page-by-page (uses pypdf)
+rag.ingest("annual_report.pdf")
+
+# Plain text / Word / HTML / CSV → fixed-size windows (1 000 chars, 100 overlap)
+rag.ingest("notes.txt")
+rag.ingest_text("Manual entry text", source="internal memo")
+rag.ingest_dir("./docs/", pattern="**/*.pdf")
+
+# Retrieve without LLM
+results = rag.retrieve("Q3 revenue APAC", top_k=5)
+for r in results:
+    print(f"[{r.rank}] score={r.score:.3f} | {r.entry.source} p.{r.entry.page_number}")
+    print(f"  matched: {r.matched_terms}")
+    print(f"  {r.entry.content[:120]}...")
+
+# Full RAG: retrieve + generate
+response = rag.query("What were the Q3 revenue figures for APAC?")
+print(response.answer.content)
+print(f"Pages used: {len(response.sources)}")
+
+# Async variants (same signatures)
+await rag.aingest("big_report.pdf")
+results = await rag.aretrieve("revenue growth", top_k=3)
+response = await rag.aquery("Summarise the key findings.")
+```
+
+#### `PageIndexRAG` Constructor Parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `llm_kit` | `Any \| None` | `None` | Developer kit for generation. `None` = retrieve-only mode |
+| `processors` | `list[BaseProcessor] \| None` | `[TextCleaner()]` | Text cleaning applied to each page before indexing |
+| `reader_registry` | `FileReaderRegistry \| None` | Built-in | File reader for non-PDF types |
+| `context_template` | `str` | Built-in | `{context}` + `{question}` template injected into LLM |
+| `default_prompt` | `RactoPrompt \| None` | Built-in RAG prompt | System prompt used for generation |
+| `page_size` | `int` | `1000` | Max chars per window for non-PDF files |
+| `page_overlap` | `int` | `100` | Char overlap between consecutive windows |
+| `k1` | `float` | `1.5` | BM25 term-frequency saturation parameter |
+| `b` | `float` | `0.75` | BM25 length-normalisation parameter |
+| `top_keywords` | `int` | `20` | Keywords per page stored in the decision index |
+
+#### How the Decision Tree Works
+
+The "decision tree" is a two-stage retrieval strategy:
+
+1. **Stage 1 — Decision index (routing):** Each page's top-N TF-weighted keywords are stored in an inverted index (`term → {page IDs}`). A query is tokenised and each term traverses the index to collect a union of candidate pages in O(|terms|) time — this is the branching step.
+
+2. **Stage 2 — BM25 scoring:** Only the candidate pages are scored with Okapi BM25 (k1=1.5, b=0.75). This ensures accuracy on the shortlisted set without scoring the entire corpus.
+
+If no candidates are found via the index (very short or stop-word-only queries), BM25 falls back to scoring the full corpus.
+
+#### `PageEntry` Field Reference
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `entry_id` | `str` | Auto-generated UUID |
+| `page_number` | `int \| None` | 1-based page number for PDFs; `None` for window entries |
+| `content` | `str` | Full page text (post-processing) |
+| `source` | `str` | Absolute file path or label |
+| `section_title` | `str \| None` | First Markdown heading detected on the page |
+| `keywords` | `list[str]` | Top-N TF-weighted terms (stored in decision index) |
+| `doc_id` | `str` | UUID of the parent document |
+| `char_count` | `int` | Length of `content` in characters |
+
+#### `PageIndexResult` Field Reference
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `entry` | `PageEntry` | The retrieved page |
+| `score` | `float` | Okapi BM25 score (higher = more relevant) |
+| `rank` | `int` | 1-based rank within result list |
+| `matched_terms` | `list[str]` | Query tokens that matched this page |
+
+#### `PageIndexRAG` Method Reference
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `ingest(path, **metadata)` | `list[PageEntry]` | Index a file (PDF = page-by-page, others = windows) |
+| `ingest_text(text, source, **metadata)` | `list[PageEntry]` | Index raw text directly |
+| `ingest_dir(directory, pattern, **metadata)` | `list[PageEntry]` | Recursively index a directory |
+| `aingest / aingest_text / aingest_dir` | same | Async variants |
+| `retrieve(query, top_k=5)` | `list[PageIndexResult]` | Decision-tree + BM25 retrieval |
+| `aretrieve(query, top_k=5)` | `list[PageIndexResult]` | Async variant |
+| `query(question, top_k=5, ...)` | `PageIndexResponse` | Retrieve + generate answer |
+| `aquery(question, top_k=5, ...)` | `PageIndexResponse` | Async variant |
+| `clear()` | `None` | Reset all indexes |
+| `entry_count` (property) | `int` | Total indexed page entries |
+| `document_count` (property) | `int` | Number of ingested documents |
 
 ---
 

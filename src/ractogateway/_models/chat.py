@@ -231,6 +231,55 @@ class ChatConfig(BaseModel):
             "  - Audio / Video → Gemini only (inline_data with correct MIME)."
         ),
     )
+    chain_of_thought: bool = Field(
+        default=False,
+        description=(
+            "When ``True``, instructs the model to reason step by step before "
+            "delivering its final answer. "
+            "A chain-of-thought constraint is appended to the compiled system "
+            "prompt, asking the model to state each reasoning step clearly and "
+            "then conclude with its answer. "
+            "Compatible with all five provider kits (OpenAI, Anthropic, Google, "
+            "Ollama, HuggingFace). "
+            "Combine with ``temperature > 0`` for richer reasoning traces."
+        ),
+    )
+    native_thinking: bool = Field(
+        default=False,
+        description=(
+            "Enable native model-level extended thinking / reasoning output. "
+            "The model's actual reasoning process is returned alongside the answer. "
+            "\n\n"
+            "**Anthropic** (``claude-3-7-sonnet-20250219`` and later): "
+            "Adds a ``thinking`` content block before the answer; temperature is "
+            "automatically forced to 1 as required by the API. "
+            "Thinking text streams in ``StreamChunk.delta.thinking`` / "
+            "``StreamChunk.accumulated_thinking``; non-streaming responses expose "
+            "it in ``LLMResponse.thinking``. "
+            "\n\n"
+            "**Google** (``gemini-2.5-pro``, ``gemini-2.0-flash-thinking-exp``): "
+            "Thought parts are separated from the answer and returned in the same "
+            "``thinking`` fields. "
+            "\n\n"
+            "**OpenAI** (``o1``, ``o3``, ``o3-mini``): Reasoning happens internally; "
+            "no reasoning text is exposed but ``LLMResponse.usage[reasoning_tokens]`` "
+            "shows how many tokens were consumed. "
+            "\n\n"
+            "Use ``thinking_budget`` to control reasoning token spend."
+        ),
+    )
+    thinking_budget: int = Field(
+        default=10000,
+        gt=0,
+        description=(
+            "Maximum tokens the model may spend on internal thinking / reasoning. "
+            "Only meaningful when ``native_thinking=True``. "
+            "Higher budgets allow deeper reasoning but increase cost and latency. "
+            "Anthropic: 1024-100000 (recommended >= 1024). "
+            "Google: set to a positive integer; the model respects it as a soft cap. "
+            "Must be greater than 0."
+        ),
+    )
     extra: dict[str, Any] = Field(
         default_factory=dict,
         description=(
