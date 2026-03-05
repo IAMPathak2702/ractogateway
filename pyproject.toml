@@ -198,6 +198,8 @@ observability = [
 # pip install ractogateway[pipelines-video-openai-whisper] — + openai-whisper (local ASR)
 # pip install ractogateway[pipelines-video-yt]             — + yt-dlp (YouTube download)
 # pip install ractogateway[pipelines-video-full]           — video core + whisper + yt-dlp
+# pip install ractogateway[pipelines-agent]                — AgentPipeline (no extra deps)
+# pip install ractogateway[pipelines-agent-http]           — AgentPipeline + http_get tool
 # pip install ractogateway[pipelines]                      — all pipelines bundled
 pipelines-sql = ["sqlalchemy>=2.0,<3.0", "pandas>=2.0,<3.0"]
 pipelines-sql-viz = [
@@ -208,6 +210,9 @@ pipelines-sql-viz = [
 pipelines-sql-polars = ["sqlalchemy>=2.0,<3.0", "polars>=0.20,<2.0"]
 # List Classifier needs no extra deps — ships with every ractogateway install.
 pipelines-classifier = []
+# Agent Pipeline — no extra deps for core; httpx needed for the http_get tool
+pipelines-agent = []
+pipelines-agent-http = ["httpx>=0.27,<1.0"]
 # Video Processor — frame extraction, dedup, audio extraction, vision analysis
 pipelines-video = [
     "opencv-python>=4.8,<5.0",
@@ -233,6 +238,7 @@ pipelines = [
     "ractogateway[pipelines-sql]",
     "ractogateway[pipelines-classifier]",
     "ractogateway[pipelines-video]",
+    "ractogateway[pipelines-agent]",
 ]
 
 dev = [
@@ -422,6 +428,15 @@ known-first-party = ["ractogateway"]
 "src/ractogateway/pipelines/video_processor/_summarizer.py" = ["E501", "RUF100"]
 "src/ractogateway/pipelines/video_processor/_rag.py" = ["E501", "S110"]
 "src/ractogateway/pipelines/video_processor/_loader.py" = ["E501", "S108"]
+# Agent Pipeline — broad BLE001/S110 used intentionally for tool execution safety net
+"src/ractogateway/pipelines/agent/_executor.py" = ["BLE001"]
+"src/ractogateway/pipelines/agent/pipeline.py" = ["BLE001", "E501"]
+"tests/test_agent_pipeline.py" = [
+    "E501",
+    "PLR2004",
+    "S101",
+    "I001",
+]
 "tests/test_video_processor.py" = [
     "E501",
     "PLR2004",

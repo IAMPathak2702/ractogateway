@@ -26,6 +26,14 @@ Available pipelines
   Audio:    ``pip install ractogateway[pipelines-video-whisper]``
   YouTube:  ``pip install ractogateway[pipelines-video-yt]``
 
+- :class:`AgentPipeline` / :class:`AsyncAgentPipeline` —
+  Autonomous ReAct (Reason + Act) agent with pluggable tools.  The agent
+  reasons step-by-step, calls tools (RAG search, SQL query, HTTP fetch,
+  memory, or any Python callable), observes results, and repeats until it
+  reaches a final answer or the ``max_steps`` cap.
+  No extra dependencies for the core agent.
+  HTTP tool: ``pip install ractogateway[pipelines-agent-http]``
+
 Usage::
 
     from ractogateway.pipelines import SQLAnalystPipeline, ListClassifierPipeline
@@ -65,22 +73,41 @@ Usage::
     res = vp.run("lecture.mp4")       # or YouTube URL / bytes / pre-extracted frames
     print(res.summary)
     res.to_markdown("report.md")
+
+    # Agent
+    from ractogateway.pipelines import AgentPipeline
+
+    def get_weather(city: str) -> str:
+        \"\"\"Return the current weather for a city.\"\"\"
+        return f"Sunny, 22 C in {city}"
+
+    agent = AgentPipeline(
+        kit=Chat(model="gpt-4o"),
+        tools=[get_weather],
+        max_steps=6,
+        safe_mode=True,
+    )
+    result = agent.run("What is the weather in Paris?")
+    print(result.final_answer)
+    print(result.to_markdown())
 """
 
-from ractogateway.pipelines.video_processor import (
-    AsyncVideoProcessorPipeline,
-    DeduplicationMethod,
-    FrameAnalysisMode,
-    FrameEntry,
-    TranscriberBackend,
-    TranscriptSegment,
-    VideoConfig,
-    VideoInput,
-    VideoProcessorPipeline,
-    VideoProcessorResult,
-    VideoProcessorUsage,
-    VideoRateLimitExceededError,
-    VideoSection,
+from ractogateway.pipelines.agent import (
+    FINISH_TOOL,
+    AgentPipeline,
+    AgentRateLimitExceededError,
+    AgentResult,
+    AgentStep,
+    AgentUsage,
+    AsyncAgentPipeline,
+    StopReason,
+    ToolExecutor,
+    make_finish_tool,
+    make_http_tool,
+    make_memory_tools,
+    make_rag_tool,
+    make_rag_tool_async,
+    make_sql_tool,
 )
 from ractogateway.pipelines.list_classifier import (
     AsyncListClassifierPipeline,
@@ -101,8 +128,39 @@ from ractogateway.pipelines.sql_analyst import (
     SQLAnalystResult,
     clear_schema_cache,
 )
+from ractogateway.pipelines.video_processor import (
+    AsyncVideoProcessorPipeline,
+    DeduplicationMethod,
+    FrameAnalysisMode,
+    FrameEntry,
+    TranscriberBackend,
+    TranscriptSegment,
+    VideoConfig,
+    VideoInput,
+    VideoProcessorPipeline,
+    VideoProcessorResult,
+    VideoProcessorUsage,
+    VideoRateLimitExceededError,
+    VideoSection,
+)
 
 __all__ = [
+    # Agent
+    "AgentPipeline",
+    "AgentRateLimitExceededError",
+    "AgentResult",
+    "AgentStep",
+    "AgentUsage",
+    "AsyncAgentPipeline",
+    "FINISH_TOOL",
+    "StopReason",
+    "ToolExecutor",
+    "make_finish_tool",
+    "make_http_tool",
+    "make_memory_tools",
+    "make_rag_tool",
+    "make_rag_tool_async",
+    "make_sql_tool",
     # SQL Analyst
     "AsyncSQLAnalystPipeline",
     "ChartSpec",

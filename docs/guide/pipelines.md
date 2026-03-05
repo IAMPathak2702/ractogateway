@@ -1,8 +1,9 @@
 # Prebuilt Pipelines
 
-RactoGateway prebuilt pipelines package complete, production-ready workflows on top
-of developer kits. A pipeline usually combines multiple LLM calls, validation,
-optional retries, and operational controls into one class with `run()` and `arun()`.
+RactoGateway prebuilt pipelines package complete, production-ready workflows
+on top of developer kits. A pipeline usually combines multiple LLM calls,
+validation, optional retries, and operational controls into one class with
+`run()` and `arun()`.
 
 ## Installation
 
@@ -27,15 +28,20 @@ pip install "ractogateway[pipelines-video]"
 pip install "ractogateway[pipelines-video-whisper]"   # + local faster-whisper
 pip install "ractogateway[pipelines-video-yt]"        # + YouTube download
 pip install "ractogateway[pipelines-video-full]"      # everything
+
+# Agent Pipeline — no extra deps for core
+pip install "ractogateway[pipelines-agent]"
+pip install "ractogateway[pipelines-agent-http]"      # + http_get tool
 ```
 
 ## Pipeline Catalog
 
 | Pipeline | Classes | Main job | Best for |
 | --- | --- | --- | --- |
-| SQL Analyst | `SQLAnalystPipeline`, `AsyncSQLAnalystPipeline` | Natural language → SQL → analysis → Markdown answer + optional chart | Analytics copilots, BI assistants, ops reporting |
-| List Classifier | `ListClassifierPipeline`, `AsyncListClassifierPipeline` | Natural language query → best matching option(s) from `list[str]` | Ticket routing, intent detection, queue triage |
+| SQL Analyst | `SQLAnalystPipeline`, `AsyncSQLAnalystPipeline` | NL → SQL → analysis → Markdown answer + optional chart | Analytics copilots, BI assistants, ops reporting |
+| List Classifier | `ListClassifierPipeline`, `AsyncListClassifierPipeline` | NL query → best matching option(s) from `list[str]` | Ticket routing, intent detection, queue triage |
 | Video Processor | `VideoProcessorPipeline`, `AsyncVideoProcessorPipeline` | Video → frames + transcript + vision analysis + summary + RAG | Lecture indexing, whiteboard extraction, video Q&A |
+| Agent | `AgentPipeline`, `AsyncAgentPipeline` | ReAct loop: reason → call tool → observe → repeat until done | Multi-step automation, research, data retrieval, agentic workflows |
 
 ## Common Import Pattern
 
@@ -46,6 +52,7 @@ from ractogateway.pipelines import (
     ListClassifierPipeline,
     VideoProcessorPipeline,
     TranscriberBackend,
+    AgentPipeline,
 )
 
 sql_pipeline = SQLAnalystPipeline(kit=gpt.Chat(model="gpt-4o"))
@@ -62,6 +69,18 @@ video_pipeline = VideoProcessorPipeline(
 )
 result = video_pipeline.run("lecture.mp4")
 print(result.summary)
+
+def get_weather(city: str) -> str:
+    """Return current weather for a city."""
+    return f"Sunny, 22 C in {city}"
+
+agent = AgentPipeline(
+    kit=gpt.Chat(model="gpt-4o-mini"),
+    tools=[get_weather],
+    max_steps=6,
+)
+result = agent.run("What is the weather in Berlin?")
+print(result.final_answer)
 ```
 
 ## Detailed Guides
@@ -72,4 +91,5 @@ print(result.summary)
 pipelines/sql_analyst
 pipelines/list_classifier
 pipelines/video_processor
+pipelines/agent
 ```
