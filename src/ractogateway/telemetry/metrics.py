@@ -192,7 +192,7 @@ class GatewayMetricsMiddleware:
             Completion tokens produced (``0`` for cache hits or errors).
         tool_calls:
             List of ``ToolCallResult`` objects from the response.
-            Used to update :metric:`ractogateway_tool_calls_total`.
+            Used to update ``ractogateway_tool_calls_total``.
         """
         m = self._metrics
         m["requests_total"].labels(

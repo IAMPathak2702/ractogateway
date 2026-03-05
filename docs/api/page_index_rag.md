@@ -9,6 +9,7 @@ No embeddings, no vector store required.
 .. autoclass:: ractogateway.rag.page_index.pipeline.PageIndexRAG
    :members:
    :show-inheritance:
+   :no-index:
 ```
 
 ## Models
@@ -17,6 +18,7 @@ No embeddings, no vector store required.
 .. automodule:: ractogateway.rag.page_index._models
    :members:
    :show-inheritance:
+   :no-index:
 ```
 
 ## BM25 Engine
@@ -25,4 +27,5 @@ No embeddings, no vector store required.
 .. automodule:: ractogateway.rag.page_index._bm25
    :members:
    :show-inheritance:
+   :no-index:
 ```
