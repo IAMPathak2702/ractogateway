@@ -93,9 +93,7 @@ class ToolExecutor:
 
     # ── Sync execution ───────────────────────────────────────────────────────
 
-    def execute(
-        self, tool_name: str, tool_input: dict[str, Any]
-    ) -> tuple[str, float]:
+    def execute(self, tool_name: str, tool_input: dict[str, Any]) -> tuple[str, float]:
         """Execute *tool_name* synchronously.
 
         Returns
@@ -201,9 +199,7 @@ def make_rag_tool(rag_pipeline: Any) -> tuple[str, Callable]:  # type: ignore[ty
         result = rag_pipeline.search(query)
         # Support RetrievalResult.chunks or plain list
         chunks = (
-            getattr(result, "chunks", None)
-            or getattr(result, "results", None)
-            or []
+            getattr(result, "chunks", None) or getattr(result, "results", None) or []
         )
         if chunks:
             parts = []
@@ -227,9 +223,7 @@ def make_rag_tool_async(rag_pipeline: Any) -> tuple[str, Callable]:  # type: ign
         """Search the knowledge base for information relevant to the query."""
         result = await rag_pipeline.asearch(query)
         chunks = (
-            getattr(result, "chunks", None)
-            or getattr(result, "results", None)
-            or []
+            getattr(result, "chunks", None) or getattr(result, "results", None) or []
         )
         if chunks:
             parts = []

@@ -2,29 +2,34 @@
 
 This package provides four primary classes:
 
-* :class:`RactoMCPServer` — expose any :class:`~ractogateway.tools.ToolRegistry`
-  as an MCP server (stdio or SSE transport).  Works with tools built for any
-  of the three provider developer kits.
+:class:`RactoMCPServer`
+    Expose any :class:`~ractogateway.tools.ToolRegistry` as an MCP server
+    (stdio or SSE transport).  Works with tools built for any of the three
+    provider developer kits.
 
-* :class:`RactoMCPClient` — connect to an MCP server (stdio / SSE /
-  streamable-HTTP) and import its tools as a
-  :class:`~ractogateway.tools.ToolRegistry` compatible with every kit.
+:class:`RactoMCPClient`
+    Connect to an MCP server (stdio / SSE / streamable-HTTP) and import its
+    tools as a :class:`~ractogateway.tools.ToolRegistry` compatible with
+    every kit.
 
-* :class:`MCPMultiClient` — connect to **N** MCP servers simultaneously
-  and present their tools as a single merged
-  :class:`~ractogateway.tools.ToolRegistry`.
+:class:`MCPMultiClient`
+    Connect to N MCP servers simultaneously and present their tools as a
+    single merged :class:`~ractogateway.tools.ToolRegistry`.
 
-* :class:`MCPAgent` — automatic agentic loop (LLM → tool call → execute →
-  continue) that works identically with
-  :class:`~ractogateway.openai_developer_kit.OpenAIDeveloperKit`,
-  :class:`~ractogateway.google_developer_kit.GoogleDeveloperKit`, and
-  :class:`~ractogateway.anthropic_developer_kit.AnthropicDeveloperKit`.
+:class:`MCPAgent`
+    Automatic agentic loop (LLM → tool call → execute → continue) that works
+    with OpenAI, Google Gemini, and Anthropic Claude developer kits.
 
 Configuration models:
 
-* :class:`MCPServerConfig` — server name / version metadata.
-* :class:`MCPClientConfig` — transport, command / URL, env vars.
-* :class:`MCPToolResult` — content + error flag returned by tool calls.
+:class:`MCPServerConfig`
+    Server name / version metadata.
+
+:class:`MCPClientConfig`
+    Transport, command / URL, env vars.
+
+:class:`MCPToolResult`
+    Content + error flag returned by tool calls.
 
 Quick start
 -----------

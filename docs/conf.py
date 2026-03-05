@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import sys
 import warnings
+from importlib import import_module
 from pathlib import Path
 from typing import Protocol
 
@@ -225,5 +226,47 @@ def _generate_module_reference(_: _SphinxApp) -> None:
             stale_file.unlink()
 
 
+def _skip_nonlocal_imported_members(
+    app: _SphinxApp,
+    what: str,
+    name: str,
+    obj: object,
+    skip: bool,
+    _options: object,
+) -> bool | None:
+    """Skip imported module members unless explicitly re-exported via ``__all__``.
+
+    This prevents autodoc from rendering third-party helper docs (e.g. pydantic
+    ``Field`` / validators), whose Markdown-style docstrings trigger docutils
+    parse errors in our RST pipeline.
+    """
+    if skip or what != "module":
+        return None
+
+    module_name = getattr(getattr(app, "env", None), "temp_data", {}).get("autodoc:module")
+    if not isinstance(module_name, str) or not module_name:
+        return None
+
+    module = sys.modules.get(module_name)
+    if module is None:
+        try:
+            module = import_module(module_name)
+        except Exception:
+            return None
+
+    exported = getattr(module, "__all__", None)
+    if isinstance(exported, (list, tuple, set, frozenset)) and name in exported:
+        return None
+
+    obj_module = getattr(obj, "__module__", None)
+    if isinstance(obj, type(sys)):
+        obj_module = getattr(obj, "__name__", None)
+
+    if isinstance(obj_module, str) and obj_module != module_name:
+        return True
+    return None
+
+
 def setup(app: _SphinxApp) -> None:
     app.connect("builder-inited", _generate_module_reference)
+    app.connect("autodoc-skip-member", _skip_nonlocal_imported_members)

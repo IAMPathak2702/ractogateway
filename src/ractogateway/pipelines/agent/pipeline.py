@@ -5,7 +5,7 @@ Implements the Reason+Act (ReAct) loop:
   1. The LLM receives a system prompt listing all registered tools and a
      growing conversation transcript (goal + previous steps).
   2. The LLM responds with a single JSON object:
-       {"thought": "...", "tool_name": "...", "tool_input": {...}}
+     ``{"thought": "...", "tool_name": "...", "tool_input": {...}}``
   3. The tool is executed; its result (the *observation*) is appended to
      the transcript.
   4. The loop repeats until the LLM calls ``finish(answer=...)`` or

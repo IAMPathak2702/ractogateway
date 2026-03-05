@@ -6,33 +6,32 @@ full observability hooks, per-step model control, and optional per-call override
 
 Available pipelines
 -------------------
-- :class:`SQLAnalystPipeline` / :class:`AsyncSQLAnalystPipeline` —
-  NL → SQL → pandas → Markdown answer + optional Plotly chart.
-  Requires: ``pip install ractogateway[pipelines-sql]``
-  Charts:   ``pip install ractogateway[pipelines-sql-viz]``
 
-- :class:`ListClassifierPipeline` / :class:`AsyncListClassifierPipeline` —
-  NL query → best-matching item(s) from a ``list[str]``.
-  Uses dynamic ``Enum`` + Pydantic validation; supports single/multi selection,
-  confidence scores, reasoning, retries, memory, rate limiting, and telemetry.
-  No extra dependencies — works with any installed provider kit.
+:class:`SQLAnalystPipeline` / :class:`AsyncSQLAnalystPipeline`
+    NL → SQL → pandas → Markdown answer + optional Plotly chart.
+    Requires: ``pip install ractogateway[pipelines-sql]``
+    Charts:   ``pip install ractogateway[pipelines-sql-viz]``
 
-- :class:`VideoProcessorPipeline` / :class:`AsyncVideoProcessorPipeline` —
-  Process tutorial/lecture videos: frame deduplication, audio transcription,
-  vision-LLM analysis (whiteboard / screen), comprehensive summary, optional
-  RAG storage.  Accepts local paths, URLs, YouTube links, raw bytes, or
-  pre-extracted frame images.
-  Requires: ``pip install ractogateway[pipelines-video]``
-  Audio:    ``pip install ractogateway[pipelines-video-whisper]``
-  YouTube:  ``pip install ractogateway[pipelines-video-yt]``
+:class:`ListClassifierPipeline` / :class:`AsyncListClassifierPipeline`
+    NL query → best-matching item(s) from a ``list[str]``.
+    Uses dynamic ``Enum`` + Pydantic validation; supports single/multi
+    selection, confidence scores, reasoning, retries, memory, rate limiting,
+    and telemetry.  No extra dependencies.
 
-- :class:`AgentPipeline` / :class:`AsyncAgentPipeline` —
-  Autonomous ReAct (Reason + Act) agent with pluggable tools.  The agent
-  reasons step-by-step, calls tools (RAG search, SQL query, HTTP fetch,
-  memory, or any Python callable), observes results, and repeats until it
-  reaches a final answer or the ``max_steps`` cap.
-  No extra dependencies for the core agent.
-  HTTP tool: ``pip install ractogateway[pipelines-agent-http]``
+:class:`VideoProcessorPipeline` / :class:`AsyncVideoProcessorPipeline`
+    Process tutorial/lecture videos: frame dedup, audio transcription,
+    vision-LLM analysis (whiteboard/screen), comprehensive summary, optional
+    RAG storage.  Accepts local paths, URLs, YouTube links, raw bytes, or
+    pre-extracted frame images.
+    Requires: ``pip install ractogateway[pipelines-video]``
+    Audio:    ``pip install ractogateway[pipelines-video-whisper]``
+    YouTube:  ``pip install ractogateway[pipelines-video-yt]``
+
+:class:`AgentPipeline` / :class:`AsyncAgentPipeline`
+    Autonomous ReAct agent: reason, call tools, observe, repeat.
+    Supports RAG search, SQL query, HTTP fetch, memory, and any Python
+    callable.  Stops at ``max_steps`` or when ``finish()`` is called.
+    HTTP tool: ``pip install ractogateway[pipelines-agent-http]``
 
 Usage::
 

@@ -13,8 +13,7 @@ AgentRateLimitExceededError
 
 Tool factories (for advanced use)
 ----------------------------------
-make_finish_tool, make_rag_tool, make_rag_tool_async,
-make_sql_tool, make_http_tool, make_memory_tools
+make_finish_tool, make_rag_tool, make_rag_tool_async, make_sql_tool, make_http_tool, make_memory_tools
     Pre-built tool factories used internally; exposed for custom wiring.
 ToolExecutor
     Low-level sync / async tool runner.

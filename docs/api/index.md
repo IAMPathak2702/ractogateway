@@ -18,6 +18,7 @@ finetune
 chain_of_thought
 native_thinking
 rag
+page_index_rag
 cache
 routing
 truncation
@@ -26,4 +27,7 @@ mcp
 redis
 celery
 kafka
+telemetry
+video_processor
+agent
 ```
