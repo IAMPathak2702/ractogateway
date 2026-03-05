@@ -37,6 +37,10 @@
 18. [Redis — Production Infrastructure](#18-redis--production-infrastructure)
 19. [Common Mistakes & How to Fix Them](#19-common-mistakes--how-to-fix-them)
 20. [Prebuilt Pipelines — Production Workflows](#20-prebuilt-pipelines--production-workflows)
+    - SQL Analyst, List Classifier, Video Processor, Agent
+21. [Chain of Thought Reasoning](#21-chain-of-thought-reasoning)
+22. [Native Thinking / Extended Reasoning](#22-native-thinking--extended-reasoning)
+23. [PageIndexRAG — Vectorless RAG](#23-pageindexrag--vectorless-rag)
 
 ---
 
@@ -1944,26 +1948,165 @@ single `chat()` call is not enough.
 |---|---|---|
 | SQL Analyst | `SQLAnalystPipeline`, `AsyncSQLAnalystPipeline` | Natural language analytics over SQL databases |
 | List Classifier | `ListClassifierPipeline`, `AsyncListClassifierPipeline` | Map user text to one or more options from a list |
+| Video Processor | `VideoProcessorPipeline`, `AsyncVideoProcessorPipeline` | Extract frames, transcribe audio, analyse with vision LLM, summarise |
+| Agent | `AgentPipeline`, `AsyncAgentPipeline` | Autonomous ReAct agent — reason + call tools + observe → answer |
 
-### Quick examples
+### Install extras
+
+```bash
+# SQL Analyst
+pip install ractogateway[pipelines-sql]           # core (no charts)
+pip install ractogateway[pipelines-sql-viz]        # + Plotly charts
+
+# Video Processor
+pip install ractogateway[pipelines-video]          # OpenCV + ffmpeg + pHash
+pip install ractogateway[pipelines-video-whisper]  # + faster-whisper (local ASR)
+pip install ractogateway[pipelines-video-yt]       # + yt-dlp (YouTube download)
+
+# Agent
+pip install ractogateway[pipelines-agent]          # core (no extra deps)
+pip install ractogateway[pipelines-agent-http]     # + httpx (http_get tool)
+```
+
+### SQL Analyst — quick example
 
 ```python
 from ractogateway import openai_developer_kit as gpt
-from ractogateway.pipelines import SQLAnalystPipeline, ListClassifierPipeline
+from ractogateway.pipelines import SQLAnalystPipeline
 
 sql_pipeline = SQLAnalystPipeline(kit=gpt.Chat(model="gpt-4o"))
-sql_result = sql_pipeline.run(
+result = sql_pipeline.run(
     user_query="Top 5 products by revenue",
     connection_string="postgresql://user:pass@localhost:5432/shop",
 )
-print(sql_result.answer)
+print(result.answer)
+```
+
+### List Classifier — quick example
+
+```python
+from ractogateway.pipelines import ListClassifierPipeline
 
 classifier = ListClassifierPipeline(
     kit=gpt.Chat(model="gpt-4o-mini"),
     options=["Billing", "Technical Support", "Sales"],
+    include_confidence=True,
+    include_reasoning=True,
 )
-clf_result = classifier.run("I cannot update my payment method")
-print(clf_result.first)
+result = classifier.run("I cannot update my payment method")
+print(result.first)           # "Billing"
+print(result.top_confidence)  # e.g. 0.96
+```
+
+### Video Processor — quick example
+
+Process a lecture or tutorial video end-to-end — extract key frames, transcribe speech, use a vision LLM to read whiteboards/screens, and produce a structured Markdown report.
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.pipelines import VideoProcessorPipeline, TranscriberBackend, DeduplicationMethod
+
+pipeline = VideoProcessorPipeline(
+    kit=gpt.Chat(model="gpt-4o"),        # vision LLM + summary
+    fps=1.0,                              # sample one frame per second
+    similarity_threshold=85.0,            # drop frames that are ≥85% similar to the previous
+    dedup_method=DeduplicationMethod.PHASH,
+    transcriber=TranscriberBackend.FASTER_WHISPER,
+    transcriber_model="base",
+    analyze_frames=True,
+    generate_summary=True,
+    safe_mode=True,
+)
+
+# Accepts: local path, HTTP URL, YouTube URL, raw bytes, or pre-extracted frame list
+result = pipeline.run("lecture.mp4")
+
+print(f"Frames kept : {result.usage.frames_kept}/{result.usage.frames_extracted}")
+print(f"Tokens used : {result.usage.total_tokens}")
+print(result.summary)          # structured Markdown summary
+result.to_markdown("report.md")  # save full report
+```
+
+**What it produces (`VideoProcessorResult`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `frames` | `list[FrameEntry]` | Every extracted frame with its LLM analysis |
+| `transcript` | `list[TranscriptSegment]` | Timed speech-to-text segments |
+| `sections` | `list[VideoSection]` | Time windows merging visual + audio content |
+| `summary` | `str` | 7-section Markdown summary |
+| `usage` | `VideoProcessorUsage` | Token counts + frame statistics |
+
+**Supported transcription backends (`TranscriberBackend`):**
+
+| Backend | Value | Requires |
+|---|---|---|
+| Faster Whisper (default) | `"faster-whisper"` | `pip install ractogateway[pipelines-video-whisper]` |
+| OpenAI Whisper (local) | `"openai-whisper"` | `pip install openai-whisper` |
+| OpenAI API | `"openai-api"` | OpenAI API key |
+| Groq API (ultra-fast) | `"groq-api"` | `pip install groq` + Groq API key |
+| Deepgram | `"deepgram-api"` | `pip install deepgram-sdk` + key |
+| Google Cloud STT | `"google-api"` | `pip install google-cloud-speech` + key |
+| HuggingFace local | `"huggingface-local"` | `pip install transformers torch` |
+| HuggingFace API | `"huggingface-api"` | `pip install huggingface_hub` + key |
+| Ollama | `"ollama"` | Running Ollama server |
+
+### Agent — quick example
+
+An autonomous **ReAct** (Reason + Act) agent that loops: think → call tool → observe → repeat until it calls the built-in `finish()` tool.
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.pipelines import AgentPipeline
+
+def get_weather(city: str) -> str:
+    """Return current weather for a city."""
+    return f"Sunny, 22 °C in {city}"
+
+def unit_convert(value: float, from_unit: str, to_unit: str) -> str:
+    """Convert a value between units."""
+    # ... your logic here ...
+    return f"{value} {from_unit} = ... {to_unit}"
+
+agent = AgentPipeline(
+    kit=gpt.Chat(model="gpt-4o"),
+    tools=[get_weather, unit_convert],
+    max_steps=8,
+    safe_mode=True,
+)
+
+result = agent.run("What is the weather in Paris, and convert 22°C to Fahrenheit?")
+print(result.final_answer)
+print(result.to_markdown())   # step-by-step trace
+```
+
+**Agent result fields (`AgentResult`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `final_answer` | `str \| None` | The agent's concluded answer |
+| `steps` | `list[AgentStep]` | Every thought / tool call / observation |
+| `stop_reason` | `StopReason` | `"finish"`, `"max_steps"`, or `"error"` |
+| `usage` | `AgentUsage` | Cumulative token counts across all steps |
+
+**Built-in tool factories:**
+
+```python
+from ractogateway.pipelines import (
+    make_rag_tool,        # rag_search(query) → relevant chunks from RactoRAG
+    make_sql_tool,        # sql_query(question) → answer from SQLAnalystPipeline
+    make_http_tool,       # http_get(url) → page text (requires httpx)
+    make_memory_tools,    # memory_read(key) + memory_write(key, value)
+)
+
+agent = AgentPipeline(
+    kit=gpt.Chat(model="gpt-4o"),
+    tools=[get_weather],               # your custom tools
+    rag_pipeline=my_rag,               # auto-registers rag_search
+    sql_pipeline=my_sql,               # auto-registers sql_query
+    agent_memory={},                   # dict → auto-registers memory_read/write
+    extra_tools=[make_http_tool()],    # opt-in http_get
+)
 ```
 
 ### Full guides
@@ -1971,6 +2114,232 @@ print(clf_result.first)
 - [Pipelines overview](pipelines.md)
 - [SQL Analyst pipeline](pipelines/sql_analyst.md)
 - [List Classifier pipeline](pipelines/list_classifier.md)
+- [Video Processor pipeline](pipelines/video_processor.md)
+- [Agent pipeline](pipelines/agent.md)
+
+---
+
+## 21. Chain of Thought Reasoning
+
+**Chain of Thought (CoT)** prompts the model to reason step-by-step before giving its
+final answer. RactoGateway exposes this as a single `ChatConfig` flag — no prompt
+engineering required.
+
+### How to enable
+
+```python
+from ractogateway import openai_developer_kit as gpt
+
+kit = gpt.Chat(model="gpt-4o")
+response = kit.chat(
+    gpt.ChatConfig(
+        user_message="If a train travels 300 km in 2.5 hours, what is its average speed?",
+        chain_of_thought=True,   # ← flip this flag
+    )
+)
+print(response.content)
+# The model will reason through the problem before stating "120 km/h"
+```
+
+### What it does internally
+
+Setting `chain_of_thought=True` appends a step-by-step reasoning constraint to the
+`RactoPrompt` before the request is sent. The constraint instructs the model to:
+
+1. Break the problem into numbered reasoning steps.
+2. Show its working at each step.
+3. State the final answer clearly at the end.
+
+This is applied *per request* — it does not modify the kit's default prompt permanently.
+
+### When to use CoT
+
+| Scenario | Benefit |
+|---|---|
+| Math / logic problems | Forces explicit calculation steps → fewer errors |
+| Multi-step planning | Surfaces assumptions and intermediate decisions |
+| Debugging assistance | Produces a traceable reasoning chain |
+| Exam / quiz apps | Provides explanation alongside the answer |
+
+### Combining with structured output
+
+```python
+from pydantic import BaseModel
+
+class ReasonedAnswer(BaseModel):
+    steps: list[str]
+    final_answer: str
+
+response = kit.chat(
+    gpt.ChatConfig(
+        user_message="How many seconds are in a leap year?",
+        chain_of_thought=True,
+        response_model=ReasonedAnswer,   # parse result into Pydantic model
+    )
+)
+print(response.parsed.steps)
+print(response.parsed.final_answer)
+```
+
+---
+
+## 22. Native Thinking / Extended Reasoning
+
+**Native Thinking** exposes the model's *internal* chain-of-thought reasoning tokens —
+the model genuinely thinks before answering rather than being instructed to write steps.
+Supported by **Anthropic Claude** (extended thinking) and **Google Gemini** (thinking
+mode). OpenAI o-series models expose reasoning token *counts* but not the text.
+
+### Enable native thinking
+
+```python
+from ractogateway import anthropic_developer_kit as claude
+
+kit = claude.Chat(model="claude-opus-4-6")
+response = kit.chat(
+    claude.ChatConfig(
+        user_message="Prove that √2 is irrational.",
+        native_thinking=True,
+        thinking_budget=8000,   # max thinking tokens (Anthropic/Google)
+    )
+)
+print(response.thinking)   # raw model reasoning (may be hundreds of tokens)
+print(response.content)    # final polished answer
+```
+
+### Streaming with native thinking
+
+```python
+accumulated_thinking = ""
+for chunk in kit.stream(
+    claude.ChatConfig(
+        user_message="Design a cache-invalidation strategy for a distributed system.",
+        native_thinking=True,
+        thinking_budget=10000,
+    )
+):
+    if chunk.is_thinking:
+        print(chunk.delta.thinking, end="", flush=True)
+    else:
+        print(chunk.delta.text, end="", flush=True)
+```
+
+### Provider behaviour summary
+
+| Provider | Thinking text visible | Thinking budget param | Notes |
+|---|---|---|---|
+| Anthropic Claude | ✅ `response.thinking` | `thinking_budget` | Forces `temperature=1` |
+| Google Gemini | ✅ `response.thinking` | `thinking_budget` | `ThinkingConfig` injected |
+| OpenAI (o-series) | ❌ not exposed | N/A | `reasoning_tokens` count in `usage` |
+
+### `LLMResponse` fields added by native thinking
+
+| Field | Type | Description |
+|---|---|---|
+| `thinking` | `str \| None` | Raw model reasoning text |
+| `StreamDelta.thinking` | `str` | Incremental thinking token (streaming) |
+| `StreamChunk.accumulated_thinking` | `str` | Full thinking so far (streaming) |
+| `StreamChunk.is_thinking` | `bool` | `True` while in a thinking block |
+
+### When to use native thinking
+
+Use `native_thinking=True` when accuracy matters more than latency:
+
+- Complex proofs, theorem verification
+- Code architecture reviews
+- Medical / legal / scientific reasoning
+- Any task where you want to inspect the model's reasoning, not just the answer
+
+> **Cost note:** thinking tokens count toward your bill but are not included in
+> `response.content`. Set `thinking_budget` conservatively; 4000–8000 is usually enough
+> for most tasks.
+
+---
+
+## 23. PageIndexRAG — Vectorless RAG
+
+**PageIndexRAG** is a lightweight RAG pipeline that requires *no embeddings* and *no
+vector database*. It uses a two-stage keyword index + BM25 scoring to retrieve relevant
+pages from documents. Perfect for CPU-only environments, offline use, or when you want
+instant setup without configuring a vector store.
+
+### How it works
+
+```text
+Document → page split → DecisionIndex (inverted keyword index)
+                       → BM25 scorer (Okapi BM25) → top-k pages → LLM
+```
+
+1. **Page split** — PDFs are split page-by-page; all other documents use fixed character
+   windows (`page_size=1000`, `page_overlap=100`).
+2. **DecisionIndex** — builds an inverted keyword index over all pages for fast candidate
+   retrieval (no embeddings needed).
+3. **BM25 scoring** — ranks candidates with Okapi BM25, the same algorithm used by
+   Elasticsearch and Solr.
+4. **LLM answer** — top-k pages are passed to the LLM as context.
+
+### Quick example
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.rag.page_index import PageIndexRAG
+
+kit = gpt.Chat(model="gpt-4o-mini")
+
+# Build the index
+rag = PageIndexRAG(kit=kit)
+rag.add_document("docs/handbook.pdf")      # PDF — split page-by-page
+rag.add_document("docs/faq.txt")           # Plain text — split by char window
+rag.add_texts(["RactoGateway supports 5 developer kits.", "..."])
+
+# Query
+result = rag.search("What developer kits are supported?")
+print(result.answer)          # LLM answer grounded in the retrieved pages
+print(result.pages[0].text)   # raw page text that was used as context
+```
+
+### No extra install
+
+`PageIndexRAG` ships in the core package — no vector store or embedding model required:
+
+```bash
+pip install ractogateway        # PageIndexRAG included by default
+pip install ractogateway[rag]   # if you also want readers (PDF, Word, Excel…)
+```
+
+### Comparison: PageIndexRAG vs. RactoRAG
+
+| Feature | `PageIndexRAG` | `RactoRAG` |
+|---|---|---|
+| Embeddings needed | ❌ No | ✅ Yes |
+| Vector store needed | ❌ No | ✅ Yes (Chroma, FAISS, Pinecone…) |
+| Retrieval algorithm | BM25 (keyword) | Cosine similarity (semantic) |
+| Best for | Quick setup, keyword-rich docs | Deep semantic search |
+| GPU/CPU | Pure CPU | CPU or GPU (embedding model) |
+| Offline use | ✅ Fully offline | ⚠️ Depends on embedder |
+
+### When to use PageIndexRAG
+
+- Prototyping a Q&A feature without setting up a vector DB
+- Compliance / legal documents where exact keyword match matters
+- Offline / air-gapped environments
+- Structured documents (manuals, handbooks) where pages map naturally to topics
+
+### Advanced: async + per-call top-k
+
+```python
+import asyncio
+
+async def main():
+    rag = PageIndexRAG(kit=kit, top_k=5, page_size=800, page_overlap=80)
+    rag.add_document("research_paper.pdf")
+    result = await rag.asearch("What methodology did the authors use?")
+    print(result.answer)
+
+asyncio.run(main())
+```
+
+Full reference: [PageIndexRAG API](../api/page_index_rag.md)
 
 ---
 
@@ -2024,5 +2393,67 @@ def get_price(product: str) -> float:
 
 registry = ToolRegistry()
 registry.register(get_price)
-response = kit.chat(gpt.ChatConfig(user_message="How much is a widget?", tools=registry))
+response = kit.chat(gpt.ChatConfig(
+    user_message="How much is a widget?",
+    tools=registry,
+))
+
+# ── Chain of Thought ─────────────────────────────────────────────────
+response = kit.chat(gpt.ChatConfig(
+    user_message="Explain why √2 is irrational.",
+    chain_of_thought=True,           # step-by-step reasoning in the answer
+))
+
+# ── Native Thinking (Anthropic / Gemini) ─────────────────────────────
+from ractogateway import anthropic_developer_kit as claude
+claude_kit = claude.Chat(model="claude-opus-4-6")
+response = claude_kit.chat(claude.ChatConfig(
+    user_message="Design a cache-invalidation strategy.",
+    native_thinking=True,
+    thinking_budget=8000,            # max internal reasoning tokens
+))
+print(response.thinking)            # raw reasoning
+print(response.content)             # polished answer
+
+# ── PageIndexRAG (no embeddings) ─────────────────────────────────────
+from ractogateway.rag.page_index import PageIndexRAG
+rag = PageIndexRAG(kit=kit)
+rag.add_document("handbook.pdf")
+result = rag.search("What developer kits are supported?")
+print(result.answer)
+
+# ── Pipelines ────────────────────────────────────────────────────────
+from ractogateway.pipelines import (
+    SQLAnalystPipeline,
+    ListClassifierPipeline,
+    VideoProcessorPipeline,
+    AgentPipeline,
+    TranscriberBackend,
+)
+
+# SQL
+sql = SQLAnalystPipeline(kit=kit)
+sql_result = sql.run("Top 5 products", connection_string="postgresql://...")
+print(sql_result.answer)
+
+# Classifier
+clf = ListClassifierPipeline(kit=kit, options=["Billing", "Tech Support"])
+print(clf.run("I can't log in").first)
+
+# Video
+vp = VideoProcessorPipeline(
+    kit=kit,
+    transcriber=TranscriberBackend.FASTER_WHISPER,
+    generate_summary=True,
+)
+vp_result = vp.run("lecture.mp4")
+print(vp_result.summary)
+
+# Agent
+def search_web(query: str) -> str:
+    """Search the web for information."""
+    return f"Results for: {query}"
+
+agent = AgentPipeline(kit=kit, tools=[search_web], max_steps=6)
+print(agent.run("What is the capital of France?").final_answer)
 ```
