@@ -14,10 +14,17 @@ documents) where exact term matching matters more than semantic similarity.
 
 Quick start::
 
+    from ractogateway import openai_developer_kit as gpt
     from ractogateway.rag.page_index import PageIndexRAG
 
-    rag = PageIndexRAG(llm_kit=my_kit)
+    # 1. Setup
+    kit = gpt.Chat(model="gpt-4o-mini")
+    rag = PageIndexRAG(llm_kit=kit)
+
+    # 2. Ingest
     rag.ingest("report.pdf")
+
+    # 3. Query
     response = rag.query("What were the Q3 revenue figures?")
     print(response.answer.content)
 
@@ -30,9 +37,11 @@ Quick start::
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +58,7 @@ from ractogateway.rag.page_index._models import (
     PageIndexResponse,
     PageIndexResult,
 )
+from ractogateway.rag.page_index._ocr import BaseOcrBackend
 from ractogateway.rag.processors.base import BaseProcessor
 from ractogateway.rag.processors.cleaner import TextCleaner
 from ractogateway.rag.readers.registry import FileReaderRegistry
@@ -122,6 +132,21 @@ def _require_pypdf() -> Any:
     return pypdf
 
 
+def _require_pdf2image() -> Any:
+    try:
+        import pdf2image
+    except ImportError as exc:
+        raise ImportError(
+            "pdf2image is required for OCR-based PDF ingestion. "
+            "Install it with:  pip install ractogateway[rag-ocr-pdf]"
+        ) from exc
+    return pdf2image
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
@@ -176,6 +201,9 @@ class PageIndexRAG:
         k1: float = 1.5,
         b: float = 0.75,
         top_keywords: int = 20,
+        ocr_backend: BaseOcrBackend | None = None,
+        ocr_fallback: bool = True,
+        min_ocr_confidence: float = 0.0,
     ) -> None:
         self._llm_kit = llm_kit
         self._processors: list[BaseProcessor] = list(
@@ -187,12 +215,17 @@ class PageIndexRAG:
         self._page_size = page_size
         self._page_overlap = page_overlap
         self._top_keywords = top_keywords
+        self._ocr_backend = ocr_backend
+        self._ocr_fallback = ocr_fallback
+        self._min_ocr_confidence = min_ocr_confidence
 
         # In-process storage
         self._entries: dict[str, PageEntry] = {}  # entry_id → PageEntry
         self._bm25 = BM25Index(k1=k1, b=b)
         self._decision = _DecisionIndex()
         self._doc_ids: set[str] = set()
+        # Deduplication: SHA-256 of raw file bytes → doc_id
+        self._file_hashes: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -203,15 +236,47 @@ class PageIndexRAG:
             text = proc.process(text)
         return text
 
-    def _pages_from_pdf(self, path: str) -> list[tuple[int, str]]:
-        """Extract text page-by-page from a PDF using pypdf."""
+    def _ocr_page_image(
+        self, image_bytes: bytes, mime_type: str = "image/png"
+    ) -> tuple[str, float | None]:
+        """Run OCR on a single page image. Returns (text, confidence|None)."""
+        assert self._ocr_backend is not None  # noqa: S101
+        backend = self._ocr_backend
+        # TesseractOcrBackend exposes confidence natively
+        if hasattr(backend, "extract_with_confidence"):
+            text, conf = backend.extract_with_confidence(image_bytes)
+            return text, conf
+        return backend.extract_text(image_bytes, mime_type), None
+
+    def _pages_from_pdf(self, path: str) -> list[tuple[int, str, bool, float | None]]:
+        """Extract text page-by-page from a PDF.
+
+        Returns list of ``(page_number, text, ocr_applied, ocr_confidence)``.
+        When a page has no embedded text and an OCR backend is configured,
+        the page is rendered to an image and OCR'd automatically.
+        """
         pypdf = _require_pypdf()
-        pages: list[tuple[int, str]] = []
+        pages: list[tuple[int, str, bool, float | None]] = []
         with pypdf.PdfReader(path) as reader:
             for i, page in enumerate(reader.pages, start=1):
                 text = page.extract_text() or ""
                 if text.strip():
-                    pages.append((i, text))
+                    pages.append((i, text, False, None))
+                elif self._ocr_backend is not None and self._ocr_fallback:
+                    # Render page to PNG and OCR it
+                    pdf2image = _require_pdf2image()
+                    images = pdf2image.convert_from_path(
+                        path, first_page=i, last_page=i, fmt="png"
+                    )
+                    if images:
+                        import io  # noqa: PLC0415
+
+                        buf = io.BytesIO()
+                        images[0].save(buf, format="PNG")
+                        ocr_text, conf = self._ocr_page_image(buf.getvalue())
+                        if ocr_text.strip():
+                            if conf is None or conf >= self._min_ocr_confidence:
+                                pages.append((i, ocr_text, True, conf))
         return pages
 
     def _pages_from_doc(self, doc: Document) -> list[tuple[int | None, str]]:
@@ -220,13 +285,18 @@ class PageIndexRAG:
 
     def _build_entries(
         self,
-        raw_pages: list[tuple[int | None, str]],
+        raw_pages: list[tuple[int | None, str]] | list[tuple[int, str, bool, float | None]],
         source: str,
         doc_id: str,
         extra: dict[str, Any],
     ) -> list[PageEntry]:
         entries: list[PageEntry] = []
-        for page_num, raw_text in raw_pages:
+        for item in raw_pages:
+            if len(item) == 4:  # type: ignore[arg-type]
+                page_num, raw_text, ocr_applied, ocr_conf = item  # type: ignore[misc]
+            else:
+                page_num, raw_text = item[0], item[1]  # type: ignore[misc]
+                ocr_applied, ocr_conf = False, None
             processed = self._apply_processors(raw_text)
             if not processed:
                 continue
@@ -240,6 +310,8 @@ class PageIndexRAG:
                 doc_id=doc_id,
                 char_count=len(processed),
                 extra=extra,
+                ocr_applied=ocr_applied,
+                ocr_confidence=ocr_conf,
             )
             entries.append(entry)
         return entries
@@ -314,11 +386,20 @@ class PageIndexRAG:
     # Ingest — PDF
     # ------------------------------------------------------------------
 
+    def _file_hash(self, path: str) -> str:
+        return _sha256(Path(path).read_bytes())
+
     def _ingest_pdf(self, path: str, extra: dict[str, Any]) -> list[PageEntry]:
+        file_hash = self._file_hash(path)
+        if file_hash in self._file_hashes:
+            # Already indexed — return cached entries
+            cached_doc_id = self._file_hashes[file_hash]
+            return [e for e in self._entries.values() if e.doc_id == cached_doc_id]
         doc_id = str(uuid.uuid4())
         self._doc_ids.add(doc_id)
-        raw_pages: list[tuple[int | None, str]] = list(self._pages_from_pdf(path))
-        entries = self._build_entries(raw_pages, path, doc_id, extra)
+        self._file_hashes[file_hash] = doc_id
+        raw_pages = self._pages_from_pdf(path)
+        entries = self._build_entries(raw_pages, path, doc_id, extra)  # type: ignore[arg-type]
         self._index_entries(entries)
         return entries
 
@@ -327,9 +408,14 @@ class PageIndexRAG:
     # ------------------------------------------------------------------
 
     def _ingest_generic(self, path: str, extra: dict[str, Any]) -> list[PageEntry]:
+        file_hash = self._file_hash(path)
+        if file_hash in self._file_hashes:
+            cached_doc_id = self._file_hashes[file_hash]
+            return [e for e in self._entries.values() if e.doc_id == cached_doc_id]
         doc = self._reader_registry.read(path)
         doc_id = doc.doc_id
         self._doc_ids.add(doc_id)
+        self._file_hashes[file_hash] = doc_id
         raw_pages = self._pages_from_doc(doc)
         entries = self._build_entries(raw_pages, path, doc_id, extra)
         self._index_entries(entries)
@@ -399,7 +485,12 @@ class PageIndexRAG:
         )
 
     def ingest_dir(
-        self, directory: str, pattern: str = "**/*", **metadata: Any
+        self,
+        directory: str,
+        pattern: str = "**/*",
+        *,
+        on_progress: Callable[[int, int], None] | None = None,
+        **metadata: Any,
     ) -> list[PageEntry]:
         """Ingest all files matching *pattern* inside *directory*.
 
@@ -412,30 +503,116 @@ class PageIndexRAG:
             Root directory to search.
         pattern:
             Glob pattern relative to *directory* (default ``"**/*"``).
+        on_progress:
+            Optional callback ``(done, total) -> None`` called after each file
+            is processed (or skipped).  Useful for progress bars.
         **metadata:
             Forwarded to every :meth:`ingest` call.
         """
+        import logging  # noqa: PLC0415
+
         root = Path(directory)
+        files = [p for p in root.glob(pattern) if p.is_file()]
+        total = len(files)
         all_entries: list[PageEntry] = []
-        for file_path in root.glob(pattern):
-            if not file_path.is_file():
-                continue
+        for done, file_path in enumerate(files, start=1):
             try:
                 all_entries.extend(self.ingest(str(file_path), **metadata))
             except Exception as exc:
-                import logging
-
                 logging.getLogger(__name__).warning(
-                    "PageIndexRAG: skipping %s — %s", file_path, exc
+                    "PageIndexRAG: skipping %s - %s", file_path, exc
                 )
+            if on_progress is not None:
+                on_progress(done, total)
         return all_entries
 
     async def aingest_dir(
-        self, directory: str, pattern: str = "**/*", **metadata: Any
+        self,
+        directory: str,
+        pattern: str = "**/*",
+        *,
+        max_concurrent: int = 4,
+        on_progress: Callable[[int, int], None] | None = None,
+        **metadata: Any,
     ) -> list[PageEntry]:
-        """Async variant of :meth:`ingest_dir`."""
-        return await asyncio.get_event_loop().run_in_executor(
-            None, lambda: self.ingest_dir(directory, pattern, **metadata)
+        """Async parallel variant of :meth:`ingest_dir`.
+
+        Parameters
+        ----------
+        directory:
+            Root directory to search.
+        pattern:
+            Glob pattern relative to *directory* (default ``"**/*"``).
+        max_concurrent:
+            Maximum number of files ingested concurrently (default 4).
+        on_progress:
+            Optional callback ``(done, total) -> None`` called after each file
+            finishes (thread-safe; called from the event loop).
+        **metadata:
+            Forwarded to every :meth:`aingest` call.
+        """
+        import logging  # noqa: PLC0415
+
+        root = Path(directory)
+        files = [p for p in root.glob(pattern) if p.is_file()]
+        total = len(files)
+        all_entries: list[PageEntry] = []
+        sem = asyncio.Semaphore(max_concurrent)
+        done_count = 0
+
+        async def _ingest_one(fp: Path) -> list[PageEntry]:
+            nonlocal done_count
+            async with sem:
+                try:
+                    result = await self.aingest(str(fp), **metadata)
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "PageIndexRAG: skipping %s - %s", fp, exc
+                    )
+                    result = []
+                done_count += 1
+                if on_progress is not None:
+                    on_progress(done_count, total)
+                return result
+
+        results = await asyncio.gather(*[_ingest_one(fp) for fp in files])
+        for batch in results:
+            all_entries.extend(batch)
+        return all_entries
+
+    # ------------------------------------------------------------------
+    # Aliases & Compatibility
+    # ------------------------------------------------------------------
+
+    def add_document(self, path: str, **metadata: Any) -> list[PageEntry]:
+        """Alias for :meth:`ingest`."""
+        return self.ingest(path, **metadata)
+
+    def add_texts(
+        self, texts: Sequence[str], source: str = "manual", **metadata: Any
+    ) -> list[PageEntry]:
+        """Ingest a list of text strings."""
+        entries: list[PageEntry] = []
+        for t in texts:
+            entries.extend(self.ingest_text(t, source=source, **metadata))
+        return entries
+
+    def search(
+        self,
+        query: str,
+        *,
+        top_k: int = 5,
+        prompt: RactoPrompt | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 2048,
+    ) -> PageIndexResponse:
+        """Alias for :meth:`query`."""
+        return self.query(
+            query,
+            top_k=top_k,
+            prompt=prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
 
     # ------------------------------------------------------------------
@@ -550,12 +727,115 @@ class PageIndexRAG:
     # Management
     # ------------------------------------------------------------------
 
+    def remove_document(self, doc_id: str) -> int:
+        """Remove all pages belonging to *doc_id* from the index.
+
+        Parameters
+        ----------
+        doc_id:
+            The ``doc_id`` value from any :class:`PageEntry` returned during
+            ingestion.
+
+        Returns
+        -------
+        int
+            Number of page entries removed.
+        """
+        to_remove = [eid for eid, e in self._entries.items() if e.doc_id == doc_id]
+        for eid in to_remove:
+            self._decision.remove(eid)
+            self._bm25.remove(eid)
+            del self._entries[eid]
+        self._doc_ids.discard(doc_id)
+        # Remove the file hash mapping for this doc
+        self._file_hashes = {h: d for h, d in self._file_hashes.items() if d != doc_id}
+        return len(to_remove)
+
     def clear(self) -> None:
         """Remove all indexed entries and reset the pipeline to empty state."""
         self._entries.clear()
         self._bm25.clear()
         self._decision.clear()
         self._doc_ids.clear()
+        self._file_hashes.clear()
+
+    # ------------------------------------------------------------------
+    # Persistence — save / load
+    # ------------------------------------------------------------------
+
+    def save(self, path: str) -> None:
+        """Serialise the full index to a JSON file.
+
+        The saved file contains all :class:`PageEntry` records, BM25 term
+        weights, and deduplication hashes.  Reload with :meth:`load`.
+
+        Parameters
+        ----------
+        path:
+            Destination file path (will be created or overwritten).
+        """
+        import collections  # noqa: PLC0415
+
+        data: dict[str, Any] = {
+            "version": 1,
+            "entries": [e.model_dump() for e in self._entries.values()],
+            "bm25": {
+                "k1": self._bm25._k1,
+                "b": self._bm25._b,
+                "corpus": {
+                    eid: dict(counter)
+                    for eid, counter in self._bm25._corpus.items()
+                },
+                "lengths": self._bm25._lengths,
+                "df": dict(self._bm25._df),
+                "avg_dl": self._bm25._avg_dl,
+            },
+            "file_hashes": self._file_hashes,
+        }
+        Path(path).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str, **kwargs: Any) -> "PageIndexRAG":
+        """Load a previously saved index from *path*.
+
+        Parameters
+        ----------
+        path:
+            JSON file written by :meth:`save`.
+        **kwargs:
+            Forwarded to the constructor (e.g. ``llm_kit=kit``).
+
+        Returns
+        -------
+        PageIndexRAG
+            A new instance with the index fully restored.
+        """
+        import collections  # noqa: PLC0415
+
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        instance = cls(**kwargs)
+
+        # Restore entries
+        for entry_data in raw["entries"]:
+            entry = PageEntry(**entry_data)
+            instance._entries[entry.entry_id] = entry
+            instance._doc_ids.add(entry.doc_id)
+            instance._decision.add(entry.entry_id, entry.keywords)
+
+        # Restore BM25 state
+        bm25_data = raw["bm25"]
+        instance._bm25._k1 = bm25_data["k1"]
+        instance._bm25._b = bm25_data["b"]
+        instance._bm25._corpus = {
+            eid: collections.Counter(tf) for eid, tf in bm25_data["corpus"].items()
+        }
+        instance._bm25._lengths = bm25_data["lengths"]
+        instance._bm25._df = collections.Counter(bm25_data["df"])
+        instance._bm25._avg_dl = bm25_data["avg_dl"]
+
+        # Restore dedup hashes
+        instance._file_hashes = raw.get("file_hashes", {})
+        return instance
 
     @property
     def entry_count(self) -> int:

@@ -38,6 +38,7 @@ from ._models import (
     DeduplicationMethod,
     FrameAnalysisMode,
     FrameEntry,
+    StageError,
     TranscriberBackend,
     TranscriptSegment,
     VideoConfig,
@@ -61,6 +62,7 @@ __all__ = [
     "VideoInput",
     # Data models
     "FrameEntry",
+    "StageError",
     "TranscriptSegment",
     "VideoSection",
     # Result & usage

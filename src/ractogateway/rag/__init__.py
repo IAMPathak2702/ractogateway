@@ -27,8 +27,6 @@ Components
 from ractogateway.rag import chunkers, embedders, processors, readers, stores
 from ractogateway.rag._models.document import Chunk, ChunkMetadata, Document
 from ractogateway.rag._models.retrieval import RAGResponse, RetrievalConfig, RetrievalResult
-from ractogateway.rag.page_index import PageIndexRAG
-from ractogateway.rag.page_index._models import PageEntry, PageIndexResponse, PageIndexResult
 from ractogateway.rag.chunkers.fixed_chunker import FixedChunker
 from ractogateway.rag.chunkers.recursive_chunker import RecursiveChunker
 from ractogateway.rag.chunkers.semantic_chunker import SemanticChunker
@@ -36,6 +34,8 @@ from ractogateway.rag.chunkers.sentence_chunker import SentenceChunker
 from ractogateway.rag.embedders.google_embedder import GoogleEmbedder
 from ractogateway.rag.embedders.openai_embedder import OpenAIEmbedder
 from ractogateway.rag.embedders.voyage_embedder import VoyageEmbedder
+from ractogateway.rag.page_index import PageIndexRAG
+from ractogateway.rag.page_index._models import PageEntry, PageIndexResponse, PageIndexResult
 from ractogateway.rag.pipeline import RactoRAG
 from ractogateway.rag.processors.cleaner import TextCleaner
 from ractogateway.rag.processors.lemmatizer import Lemmatizer

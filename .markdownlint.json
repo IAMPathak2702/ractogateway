@@ -1,4 +1,4 @@
 {
   "MD024": { "siblings_only": true },
-  "MD013": { "tables": false, "code_blocks": false }
+  "MD013": { "tables": false, "code_blocks": false, "line_length": 200 }
 }

@@ -20,7 +20,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from typing import Sequence
+from collections.abc import Sequence
 
 # ---------------------------------------------------------------------------
 # Stopwords (small, hardcoded — no NLTK required)
@@ -46,10 +46,13 @@ _STOPWORDS: frozenset[str] = frozenset(
 # Tokeniser
 # ---------------------------------------------------------------------------
 
+_MIN_TOKEN_LEN: int = 2  # tokens shorter than this are dropped as noise
+
+
 def _tokenise(text: str) -> list[str]:
     """Lowercase, split on non-word characters, drop short / stopword tokens."""
     tokens = re.split(r"\W+", text.lower())
-    return [t for t in tokens if len(t) >= 2 and t not in _STOPWORDS]
+    return [t for t in tokens if len(t) >= _MIN_TOKEN_LEN and t not in _STOPWORDS]
 
 
 def extract_keywords(text: str, top_n: int = 20) -> list[str]:

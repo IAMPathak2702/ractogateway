@@ -17,6 +17,7 @@ Built-in tool factories:
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import time
 from collections.abc import Callable
@@ -71,10 +72,14 @@ class ToolExecutor:
     ----------
     tools:
         Mapping of tool name to callable.
+    max_retries:
+        How many times to retry a tool that raises an exception before
+        reporting an error observation to the LLM.  Default ``0`` = no retry.
     """
 
-    def __init__(self, tools: dict[str, Callable]) -> None:  # type: ignore[type-arg]
+    def __init__(self, tools: dict[str, Callable], max_retries: int = 0) -> None:  # type: ignore[type-arg]
         self._tools = tools
+        self._max_retries = max_retries
 
     @property
     def names(self) -> list[str]:
@@ -94,7 +99,7 @@ class ToolExecutor:
     # ── Sync execution ───────────────────────────────────────────────────────
 
     def execute(self, tool_name: str, tool_input: dict[str, Any]) -> tuple[str, float]:
-        """Execute *tool_name* synchronously.
+        """Execute *tool_name* synchronously, retrying up to *max_retries* times on exception.
 
         Returns
         -------
@@ -108,20 +113,25 @@ class ToolExecutor:
                 0.0,
             )
         t0 = time.perf_counter()
-        try:
-            result = self._tools[tool_name](**tool_input)
-            obs = _truncate(str(result) if result is not None else "OK (no output)")
-        except Exception as exc:
-            obs = f"ERROR executing '{tool_name}': {type(exc).__name__}: {exc}"
-        duration = (time.perf_counter() - t0) * 1000.0
-        return obs, duration
+        last_exc: BaseException = RuntimeError("no attempts")
+        for attempt in range(self._max_retries + 1):
+            try:
+                result = self._tools[tool_name](**tool_input)
+                obs = _truncate(str(result) if result is not None else "OK (no output)")
+                return obs, (time.perf_counter() - t0) * 1000.0
+            except Exception as exc:
+                last_exc = exc
+                if attempt < self._max_retries:
+                    continue
+        obs = f"ERROR executing '{tool_name}': {type(last_exc).__name__}: {last_exc}"
+        return obs, (time.perf_counter() - t0) * 1000.0
 
     # ── Async execution ───────────────────────────────────────────────────────
 
     async def aexecute(
         self, tool_name: str, tool_input: dict[str, Any]
     ) -> tuple[str, float]:
-        """Execute *tool_name* asynchronously.
+        """Execute *tool_name* asynchronously, retrying up to *max_retries* times on exception.
 
         Async callables are awaited directly; sync callables run in the
         default thread-pool executor to avoid blocking the event loop.
@@ -139,18 +149,24 @@ class ToolExecutor:
             )
         fn = self._tools[tool_name]
         t0 = time.perf_counter()
-        try:
-            if asyncio.iscoroutinefunction(fn):
-                result = await fn(**tool_input)
-            else:
-                loop = asyncio.get_event_loop()
-                captured = dict(tool_input)  # closure-safe copy
-                result = await loop.run_in_executor(None, lambda: fn(**captured))
-            obs = _truncate(str(result) if result is not None else "OK (no output)")
-        except Exception as exc:
-            obs = f"ERROR executing '{tool_name}': {type(exc).__name__}: {exc}"
-        duration = (time.perf_counter() - t0) * 1000.0
-        return obs, duration
+        last_exc: BaseException = RuntimeError("no attempts")
+        for attempt in range(self._max_retries + 1):
+            try:
+                if asyncio.iscoroutinefunction(fn):
+                    result = await fn(**tool_input)
+                else:
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(
+                        None, functools.partial(fn, **tool_input)
+                    )
+                obs = _truncate(str(result) if result is not None else "OK (no output)")
+                return obs, (time.perf_counter() - t0) * 1000.0
+            except Exception as exc:
+                last_exc = exc
+                if attempt < self._max_retries:
+                    continue
+        obs = f"ERROR executing '{tool_name}': {type(last_exc).__name__}: {last_exc}"
+        return obs, (time.perf_counter() - t0) * 1000.0
 
     async def aexecute_parallel(
         self,

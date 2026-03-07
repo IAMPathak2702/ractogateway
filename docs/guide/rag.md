@@ -63,6 +63,190 @@ response = await rag.aquery("Summarise findings.")
 | PDF (`.pdf`) | `pypdf` — one `PageEntry` per PDF page |
 | All others | Sliding character windows (`page_size=1000`, `page_overlap=100`) |
 
+### OCR support for scanned and handwritten PDFs
+
+When a PDF page contains no embedded text (scanned document, handwritten notes,
+image-only PDF), `pypdf` returns an empty string. Pass an `ocr_backend` to
+automatically fall back to OCR for those pages:
+
+```python
+from ractogateway.rag.page_index import PageIndexRAG, TesseractOcrBackend
+
+rag = PageIndexRAG(
+    llm_kit=kit,
+    ocr_backend=TesseractOcrBackend(lang="eng"),
+    ocr_fallback=True,          # default: only OCR pages with no embedded text
+    min_ocr_confidence=40.0,    # skip pages where mean word confidence < 40 (0–100)
+)
+rag.ingest("scanned_contract.pdf")   # digital pages use pypdf, blank pages use OCR
+```
+
+When `ocr_fallback=True` (default) only empty pages trigger OCR — digital pages are
+never sent to the OCR backend, keeping costs low. Set `ocr_fallback=False` to force
+OCR on every page regardless of embedded text.
+
+OCR metadata is stored on every `PageEntry`:
+
+```python
+entries = rag.ingest("scanned.pdf")
+for e in entries:
+    print(e.ocr_applied, e.ocr_confidence)   # True  87.4
+```
+
+#### Available OCR backends
+
+| Backend | Extra | Notes |
+| --- | --- | --- |
+| `TesseractOcrBackend` | `rag-ocr-tesseract` | Free, offline; requires Tesseract binary |
+| `EasyOcrBackend` | `rag-ocr-easy` | Deep-learning, 80+ languages, offline |
+| `GoogleVisionBackend` | `rag-ocr-google` | Google Cloud Vision `DOCUMENT_TEXT_DETECTION` |
+| `GoogleDocumentAIBackend` | `rag-ocr-google` | Google Document AI; best for tables / forms |
+| `AWSTextractBackend` | `rag-ocr-aws` | AWS Textract; great for key-value pairs |
+| `AzureDocumentIntelligenceBackend` | `rag-ocr-azure` | Azure Form Recognizer v4 |
+
+```bash
+pip install ractogateway[rag-ocr-tesseract]   # Tesseract (free, offline)
+pip install ractogateway[rag-ocr-easy]        # EasyOCR (deep-learning, offline)
+pip install ractogateway[rag-ocr-google]      # Google Vision + Document AI
+pip install ractogateway[rag-ocr-aws]         # AWS Textract
+pip install ractogateway[rag-ocr-azure]       # Azure Document Intelligence
+```
+
+**Tesseract** (free, offline, no API key):
+
+```python
+from ractogateway.rag.page_index import TesseractOcrBackend
+
+# Multi-language
+backend = TesseractOcrBackend(lang="eng+deu", config="--psm 6")
+rag = PageIndexRAG(llm_kit=kit, ocr_backend=backend, min_ocr_confidence=50.0)
+```
+
+**Google Document AI** (best for structured docs — invoices, contracts, forms):
+
+```python
+from ractogateway.rag.page_index import GoogleDocumentAIBackend
+
+backend = GoogleDocumentAIBackend(
+    project_id="my-gcp-project",
+    processor_id="abc123def456",   # OCR or Form Parser processor
+    location="us",
+)
+rag = PageIndexRAG(llm_kit=kit, ocr_backend=backend)
+```
+
+**AWS Textract**:
+
+```python
+from ractogateway.rag.page_index import AWSTextractBackend
+
+backend = AWSTextractBackend(region_name="us-east-1")
+# Credentials from env / ~/.aws/credentials / IAM role
+rag = PageIndexRAG(llm_kit=kit, ocr_backend=backend)
+```
+
+**Azure Document Intelligence**:
+
+```python
+from ractogateway.rag.page_index import AzureDocumentIntelligenceBackend
+
+backend = AzureDocumentIntelligenceBackend(
+    endpoint="https://my-resource.cognitiveservices.azure.com/",
+    api_key="...",
+    model_id="prebuilt-read",   # or "prebuilt-document" for richer extraction
+)
+rag = PageIndexRAG(llm_kit=kit, ocr_backend=backend)
+```
+
+---
+
+### Document deduplication
+
+Re-ingesting the same file is a **no-op** — `PageIndexRAG` computes a SHA-256
+hash of the raw file bytes on every `ingest()` call and returns the cached
+entries immediately if the file was already indexed:
+
+```python
+entries_1 = rag.ingest("report.pdf")   # indexed — 12 pages
+entries_2 = rag.ingest("report.pdf")   # no-op — returns same 12 entries instantly
+assert entries_1 == entries_2
+```
+
+This prevents duplicate pages from inflating BM25 scores when the same file is
+ingested from different paths or re-processed in a pipeline restart.
+
+---
+
+### Index persistence — save and load
+
+Persist the full index (entries, BM25 weights, dedup hashes) to a JSON file
+and reload it across process restarts:
+
+```python
+# Build and save
+rag = PageIndexRAG(llm_kit=kit, ocr_backend=TesseractOcrBackend())
+rag.ingest("report.pdf")
+rag.save("./my_index.json")
+
+# Reload in a new process — no re-ingestion needed
+rag2 = PageIndexRAG.load("./my_index.json", llm_kit=kit)
+response = rag2.query("What are the key findings?")
+print(response.answer.content)
+```
+
+The saved JSON is human-readable and portable. Any `ocr_backend` configured at
+save time must be re-supplied to `load()` if you intend to ingest new documents
+after loading; it is not serialised.
+
+---
+
+### Removing documents
+
+Remove all pages of a specific document from the index:
+
+```python
+entries = rag.ingest("old_report.pdf")
+doc_id = entries[0].doc_id
+
+removed = rag.remove_document(doc_id)
+print(f"Removed {removed} pages")
+```
+
+`remove_document` also cleans up the BM25 term-frequency state and the
+dedup hash, so the file can be re-ingested fresh afterwards.
+
+---
+
+### Parallel ingest for large corpora
+
+**Async parallel** (`aingest_dir`) — up to `max_concurrent` files at once:
+
+```python
+import asyncio
+
+async def main():
+    entries = await rag.aingest_dir(
+        "./docs/",
+        pattern="**/*.pdf",
+        max_concurrent=8,
+        on_progress=lambda done, total: print(f"{done}/{total}"),
+    )
+    print(f"Indexed {len(entries)} pages")
+
+asyncio.run(main())
+```
+
+**Sync with progress callback** (`ingest_dir`):
+
+```python
+def show_progress(done: int, total: int) -> None:
+    print(f"[{done}/{total}] ingesting...")
+
+entries = rag.ingest_dir("./docs/", on_progress=show_progress)
+```
+
+---
+
 ### Constructor parameters
 
 | Parameter | Default | Description |
@@ -77,6 +261,9 @@ response = await rag.aquery("Summarise findings.")
 | `k1` | `1.5` | BM25 term-frequency saturation |
 | `b` | `0.75` | BM25 length normalisation |
 | `top_keywords` | `20` | Keywords per page in decision index |
+| `ocr_backend` | `None` | OCR backend for scanned / handwritten PDFs |
+| `ocr_fallback` | `True` | Only OCR pages with no embedded text |
+| `min_ocr_confidence` | `0.0` | Drop OCR pages below this confidence (0–100) |
 
 ### Result models
 
@@ -92,6 +279,8 @@ response = await rag.aquery("Summarise findings.")
 | `keywords` | `list[str]` | Top-N TF terms used by decision index |
 | `doc_id` | `str` | Parent document UUID |
 | `char_count` | `int` | `len(content)` |
+| `ocr_applied` | `bool` | `True` when text was produced by OCR |
+| `ocr_confidence` | `float \| None` | Mean word confidence (0–100); `None` if unavailable |
 
 **`PageIndexResult`** — one retrieved page:
 

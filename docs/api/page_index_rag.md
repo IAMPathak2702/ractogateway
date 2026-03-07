@@ -29,3 +29,12 @@ No embeddings, no vector store required.
    :show-inheritance:
    :no-index:
 ```
+
+## OCR Backends
+
+```{eval-rst}
+.. automodule:: ractogateway.rag.page_index._ocr
+   :members:
+   :show-inheritance:
+   :no-index:
+```

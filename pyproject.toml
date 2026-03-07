@@ -105,6 +105,29 @@ all = [
     "ractogateway[huggingface]",
 ]
 
+# ── RAG OCR backends (each optional) ─────────────────────────────────────────
+# pip install ractogateway[rag-ocr-tesseract]  — free, offline Tesseract OCR
+# pip install ractogateway[rag-ocr-easy]       — EasyOCR, deep-learning, offline
+# pip install ractogateway[rag-ocr-google]     — Google Vision + Document AI
+# pip install ractogateway[rag-ocr-aws]        — AWS Textract
+# pip install ractogateway[rag-ocr-azure]      — Azure Document Intelligence
+# pip install ractogateway[rag-ocr-pdf]        — pdf2image (needed for any OCR on PDFs)
+rag-ocr-pdf       = ["pdf2image>=1.16,<2.0", "pillow>=10.0,<12.0"]
+rag-ocr-tesseract = ["pytesseract>=0.3,<1.0", "pillow>=10.0,<12.0", "pdf2image>=1.16,<2.0"]
+rag-ocr-easy      = ["easyocr>=1.7,<2.0", "pillow>=10.0,<12.0", "pdf2image>=1.16,<2.0"]
+rag-ocr-google    = [
+    "google-cloud-vision>=3.0,<4.0",
+    "google-cloud-documentai>=2.0,<3.0",
+    "pdf2image>=1.16,<2.0",
+    "pillow>=10.0,<12.0",
+]
+rag-ocr-aws       = ["boto3>=1.26,<2.0", "pdf2image>=1.16,<2.0", "pillow>=10.0,<12.0"]
+rag-ocr-azure     = [
+    "azure-ai-documentintelligence>=1.0,<2.0",
+    "pdf2image>=1.16,<2.0",
+    "pillow>=10.0,<12.0",
+]
+
 # ── RAG file readers (each optional) ─────────────────────────────────────────
 rag-pdf     = ["pypdf>=4.0,<6.0"]
 rag-word    = ["python-docx>=1.1,<2.0"]
@@ -131,6 +154,10 @@ rag-pgvector = ["psycopg2-binary>=2.9,<3.0", "pgvector>=0.3,<1.0"]
 rag-voyage = ["voyageai>=0.2,<2.0"]
 
 # ── Convenience bundles ───────────────────────────────────────────────────────
+rag-ocr-all = [
+    "ractogateway[rag-ocr-tesseract]",
+    "ractogateway[rag-ocr-easy]",
+]
 # Minimal RAG (in-memory store, text+pdf+html readers, clean+lemmatize)
 rag = [
     "ractogateway[rag-readers]",
@@ -430,7 +457,7 @@ known-first-party = ["ractogateway"]
 "src/ractogateway/pipelines/video_processor/_loader.py" = ["E501", "S108"]
 # Agent Pipeline — broad BLE001/S110 used intentionally for tool execution safety net
 "src/ractogateway/pipelines/agent/_executor.py" = ["BLE001"]
-"src/ractogateway/pipelines/agent/pipeline.py" = ["BLE001", "E501"]
+"src/ractogateway/pipelines/agent/pipeline.py" = ["BLE001", "E501", "S110"]
 "tests/test_agent_pipeline.py" = [
     "E501",
     "PLR2004",

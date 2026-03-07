@@ -222,6 +222,30 @@ class VideoProcessorUsage(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Stage error
+# ---------------------------------------------------------------------------
+
+
+class StageError(BaseModel):
+    """Structured record of a failure in one pipeline stage."""
+
+    stage: str
+    """Name of the pipeline stage that failed (e.g. 'extract', 'transcribe')."""
+
+    error_type: str
+    """Exception class name (e.g. 'ImportError', 'RuntimeError')."""
+
+    message: str
+    """str(exc) — the error message."""
+
+    traceback: str | None = None
+    """Full Python traceback as a string (available in safe_mode)."""
+
+    def __str__(self) -> str:
+        return f"[{self.stage}] {self.error_type}: {self.message}"
+
+
+# ---------------------------------------------------------------------------
 # Result
 # ---------------------------------------------------------------------------
 
@@ -248,7 +272,27 @@ class VideoProcessorResult(BaseModel):
     rag_chunk_count: int = 0
 
     usage: VideoProcessorUsage = Field(default_factory=VideoProcessorUsage)
+
     error: str | None = None
+    """Short description of the first fatal error (backward-compatible)."""
+
+    failed_stage: str | None = None
+    """Name of the stage that caused a fatal pipeline abort, if any."""
+
+    stage_errors: list[StageError] = Field(default_factory=list)
+    """All per-stage errors collected during the run (fatal + non-fatal)."""
+
+    # ── Convenience properties ────────────────────────────────────────────
+
+    @property
+    def has_errors(self) -> bool:
+        """True if any stage encountered an error."""
+        return bool(self.stage_errors)
+
+    @property
+    def is_failed(self) -> bool:
+        """True if the pipeline aborted early due to a fatal stage error."""
+        return self.failed_stage is not None
 
     # ── Convenience accessors ────────────────────────────────────────────
 
@@ -285,6 +329,16 @@ class VideoProcessorResult(BaseModel):
             f"**Kept:** {self.usage.frames_kept}  "
             f"**Discarded:** {self.usage.frames_discarded}\n"
         )
+
+        if self.failed_stage:
+            lines.append(f"> **Pipeline aborted at stage: `{self.failed_stage}`**\n")
+
+        if self.stage_errors:
+            lines.append("## Errors\n")
+            for se in self.stage_errors:
+                lines.append(f"### `{se.stage}` — {se.error_type}\n\n```\n{se.message}\n```\n")
+                if se.traceback:
+                    lines.append(f"<details><summary>Traceback</summary>\n\n```\n{se.traceback}```\n</details>\n")
 
         if self.summary:
             lines.append(f"## Summary\n\n{self.summary}\n")

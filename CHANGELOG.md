@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.2] - 2026-03-07
+
+### Added
+
+- **AgentPipeline — 5 production upgrades** (`ractogateway.pipelines.agent`):
+  - **Parallel tool execution**: LLM can now emit `{"tool_calls": [...]}` to run multiple independent tools simultaneously. Sync path uses `ThreadPoolExecutor` (controlled by `max_parallel_tools`); async path uses `asyncio.gather`.
+  - **State-aware memory**: Each transcript now includes a "PRIOR TOOL RESULTS" memo so the LLM avoids redundant calls. Deduplication key is `tool_name(sorted_json_input)`.
+  - **Graceful retries**: New `tool_retries` constructor param passed to `ToolExecutor` — failing tools are retried transparently before the error is reported to the LLM.
+  - **Dynamic step scaling**: New built-in `request_more_steps(additional, reason)` tool; loop uses a mutable `step_cap`; capped by `max_step_extension` (default `0`, opt-in).
+  - **Structured output validation**: `run(response_format=MyModel)` / `arun(response_format=MyModel)` parse the final answer into a Pydantic model stored in `AgentResult.parsed_output`; falls back to a single LLM correction call on parse failure.
+- **AgentPipeline — per-stage error isolation** for `VideoProcessorPipeline` (`StageError` model with `stage`, `error_type`, `message`, `traceback`; `result.stage_errors` list; `result.has_errors` / `result.is_failed` properties).
+- **Promptless kit usage**: All five developer kits (`OpenAI`, `Google`, `Anthropic`, `HuggingFace`, `Ollama`) now work without a `RactoPrompt`. Calling `kit.chat(ChatConfig(user_message=...))` without a prompt or `default_prompt` automatically applies a sensible built-in assistant prompt instead of raising `ValueError`.
+
+### Changed
+
+- `AgentPipeline._parse_response` return type changed from `tuple[str | None, str, dict]` to `tuple[str | None, list[tuple[str, dict]]]` to support parallel calls.
+- `AgentPipeline._run_loop` / `_arun_loop` converted from `for` to `while` loops with mutable `step_cap` to enable dynamic step extension.
+- Helper logic extracted into `_filter_calls`, `_exec_sync`, `_exec_async`, `_apply_results` private methods for readability and branch-count compliance.
+- `_build_system_prompt` extra-rules injection renumbered to rule 9 (was 7).
+- Version bumped to `0.2.2`.
+
+### Fixed
+
+- `ValueError: No prompt in ChatConfig and no default_prompt on the kit` — kits now return a default prompt instead of raising, enabling bare `kit.chat(ChatConfig(user_message=...))` usage across all providers.
+- `LLMResponse.content` (not `.text`) used correctly in `AgentPipeline` loop — fixes `AttributeError` that prevented the agent from running.
+- `_build_system_prompt` `extra_rules` numbering corrected (rule 9, not 7).
+
+---
+
+## [0.2.1] - 2026-03-05
+
+### Added
+
+- **PageIndexRAG (vectorless RAG)** in `ractogateway.rag.page_index`: BM25 ranking + keyword decision index for page-level retrieval without embeddings or a vector database.
+- **Native thinking support** across provider adapters via `ChatConfig.native_thinking` and `ChatConfig.thinking_budget`, including reasoning deltas in streaming (`StreamDelta.thinking`, `StreamChunk.accumulated_thinking`) and `LLMResponse.thinking` for supported providers.
+- **VideoProcessor pipeline** in `ractogateway.pipelines.video_processor` with frame extraction/deduplication, transcription backends, frame analysis, summarization, optional RAG storage, and sync/async APIs.
+- **Agent pipeline** in `ractogateway.pipelines.agent` with ReAct loop, pluggable tools, built-in `finish`/RAG/SQL/HTTP/memory tool factories, and sync/async execution.
+- **Test coverage** for the new pipelines: `tests/test_video_processor.py` and `tests/test_agent_pipeline.py`.
+- API and user-guide docs for PageIndexRAG, native thinking, video pipeline, and agent pipeline.
+
+### Changed
+
+- Export surface updated to expose new pipelines and RAG modules from `ractogateway.pipelines` and `ractogateway.rag`.
+- Package version source remains centralized in `src/ractogateway/_version.py`, now set to `0.2.1`.
+- Documentation and API reference navigation expanded for new pipeline and RAG pages.
+
+### Fixed
+
+- `GatewayMetricsMiddleware` metric description text updated for clearer Prometheus metric semantics.
+- Formatting corrections in PageIndexRAG documentation pages.
+
+---
+
 ## [0.1.4] — 2026-02-24
 
 ### Fixed
@@ -121,6 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.2.1]: https://github.com/IAMPathak2702/RactoGateway/compare/v0.1.4...v0.2.1
 [0.1.4]: https://github.com/IAMPathak2702/RactoGateway/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/IAMPathak2702/RactoGateway/compare/v0.1.1...v0.1.3
 [0.1.1]: https://github.com/IAMPathak2702/RactoGateway/compare/v0.1.0...v0.1.1

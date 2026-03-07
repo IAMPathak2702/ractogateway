@@ -4,11 +4,11 @@ Quick start::
 
     from ractogateway.rag.page_index import PageIndexRAG
 
-    rag = PageIndexRAG(llm_kit=my_kit)
-    rag.ingest("report.pdf")          # page-by-page PDF indexing
-    rag.ingest("notes.txt")           # sliding-window text indexing
+    rag = PageIndexRAG(llm_kit=kit)
+    rag.ingest("report.pdf")
+    rag.ingest("notes.txt")
 
-    # Retrieve without LLM
+    # Retrieve only
     results = rag.retrieve("revenue growth", top_k=5)
 
     # Full RAG: retrieve + generate
@@ -16,7 +16,20 @@ Quick start::
     print(response.answer.content)
 """
 
-from ractogateway.rag.page_index._models import PageEntry, PageIndexResponse, PageIndexResult
+from ractogateway.rag.page_index._models import (
+    PageEntry,
+    PageIndexResponse,
+    PageIndexResult,
+)
+from ractogateway.rag.page_index._ocr import (
+    AWSTextractBackend,
+    AzureDocumentIntelligenceBackend,
+    BaseOcrBackend,
+    EasyOcrBackend,
+    GoogleDocumentAIBackend,
+    GoogleVisionBackend,
+    TesseractOcrBackend,
+)
 from ractogateway.rag.page_index.pipeline import PageIndexRAG
 
 __all__ = [
@@ -24,4 +37,12 @@ __all__ = [
     "PageEntry",
     "PageIndexResult",
     "PageIndexResponse",
+    # OCR backends
+    "BaseOcrBackend",
+    "TesseractOcrBackend",
+    "EasyOcrBackend",
+    "GoogleVisionBackend",
+    "GoogleDocumentAIBackend",
+    "AWSTextractBackend",
+    "AzureDocumentIntelligenceBackend",
 ]

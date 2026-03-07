@@ -7,7 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -17,9 +17,10 @@ from pydantic import BaseModel, Field
 class StopReason(str, Enum):
     """Why the agent loop terminated."""
 
-    FINISHED = "finished"    # finish() tool was called - task complete
-    MAX_STEPS = "max_steps"  # hit the max_steps hard cap
-    ERROR = "error"          # unrecoverable exception (safe_mode=True only)
+    FINISHED = "finished"          # finish() tool was called - task complete
+    MAX_STEPS = "max_steps"        # hit the max_steps hard cap
+    ERROR = "error"                # unrecoverable exception (safe_mode=True only)
+    CIRCUIT_BREAK = "circuit_break"  # too many consecutive tool errors → forced finish
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +82,8 @@ class AgentStep(BaseModel):
 class AgentResult(BaseModel):
     """Full output of an :class:`AgentPipeline` run."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     goal: str
     """The original user goal / task string."""
 
@@ -98,6 +101,10 @@ class AgentResult(BaseModel):
 
     error: str | None = None
     """Exception message when stop_reason is ERROR."""
+
+    parsed_output: Any = Field(default=None, exclude=True)
+    """Validated Pydantic model instance when ``response_format`` was passed to ``run()``.
+    Not included in JSON serialisation; call ``result.parsed_output.model_dump()`` manually."""
 
     # ── Convenience accessors ────────────────────────────────────────────────
 
@@ -117,7 +124,14 @@ class AgentResult(BaseModel):
 
     def to_json(self, path: str | None = None, *, indent: int = 2) -> str | None:
         """Serialise to JSON. Returns string when *path* is ``None``."""
-        text = self.model_dump_json(indent=indent)
+        data = self.model_dump()
+        if self.parsed_output is not None:
+            data["parsed_output"] = (
+                self.parsed_output.model_dump()
+                if hasattr(self.parsed_output, "model_dump")
+                else self.parsed_output
+            )
+        text = json.dumps(data, indent=indent, default=str)
         if path:
             Path(path).write_text(text, encoding="utf-8")
             return None
@@ -148,6 +162,16 @@ class AgentResult(BaseModel):
                 )
         if self.final_answer:
             lines.append(f"---\n\n## Final Answer\n\n{self.final_answer}\n")
+        if self.parsed_output is not None:
+            dumped = (
+                self.parsed_output.model_dump()
+                if hasattr(self.parsed_output, "model_dump")
+                else self.parsed_output
+            )
+            lines.append(
+                f"---\n\n## Structured Output\n\n"
+                f"```json\n{json.dumps(dumped, indent=2, default=str)}\n```\n"
+            )
         if self.error:
             lines.append(f"---\n\n## Error\n\n```\n{self.error}\n```\n")
 

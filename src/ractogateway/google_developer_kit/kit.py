@@ -154,8 +154,12 @@ class GoogleDeveloperKit:
             )
         prompt = config.prompt or self._default_prompt
         if prompt is None:
-            raise ValueError(
-                "No prompt in ChatConfig and no default_prompt on the kit. Set one of them."
+            return RactoPrompt(
+                role="You are a helpful AI assistant.",
+                aim="Answer the user's question accurately and helpfully.",
+                constraints=["Be accurate, clear, and concise."],
+                tone="Helpful and professional.",
+                output_format="text",
             )
         return prompt
 

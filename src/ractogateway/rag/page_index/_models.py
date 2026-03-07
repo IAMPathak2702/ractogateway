@@ -48,6 +48,26 @@ class PageEntry(BaseModel):
         default_factory=dict,
         description="Caller-supplied metadata forwarded from ``ingest()`` kwargs.",
     )
+    ocr_applied: bool = Field(
+        default=False,
+        description="``True`` when this page's text was produced by an OCR backend.",
+    )
+    ocr_confidence: float | None = Field(
+        default=None,
+        description=(
+            "Mean OCR word confidence (0-100) reported by the backend, "
+            "if available.  ``None`` for backends that do not expose confidence."
+        ),
+    )
+    content_hash: str | None = Field(
+        default=None,
+        description="SHA-256 hex digest of the raw page bytes used for deduplication.",
+    )
+
+    @property
+    def text(self) -> str:
+        """Alias for content."""
+        return self.content
 
 
 class PageIndexResult(BaseModel):
@@ -60,6 +80,16 @@ class PageIndexResult(BaseModel):
         default_factory=list,
         description="Query tokens that matched this page's content.",
     )
+
+    @property
+    def content(self) -> str:
+        """Alias for entry.content."""
+        return self.entry.content
+
+    @property
+    def text(self) -> str:
+        """Alias for entry.content."""
+        return self.entry.content
 
 
 class PageIndexResponse(BaseModel):
@@ -81,5 +111,15 @@ class PageIndexResponse(BaseModel):
         default="",
         description="Formatted context block that was supplied to the LLM.",
     )
+
+    @property
+    def results(self) -> list[PageIndexResult]:
+        """Alias for sources."""
+        return self.sources
+
+    @property
+    def pages(self) -> list[PageIndexResult]:
+        """Alias for sources."""
+        return self.sources
 
     model_config = {"arbitrary_types_allowed": True}

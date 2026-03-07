@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import traceback as _tb
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,7 @@ from typing import Any
 from ._models import (
     DeduplicationMethod,
     FrameAnalysisMode,
+    StageError,
     TranscriberBackend,
     VideoProcessorResult,
     VideoProcessorUsage,
@@ -60,6 +62,16 @@ from ._models import (
 
 # Sentinel for "not supplied by caller"
 _UNSET = object()
+
+
+def _make_stage_error(stage: str, exc: BaseException) -> StageError:
+    """Capture a stage failure with full traceback into a StageError."""
+    return StageError(
+        stage=stage,
+        error_type=type(exc).__name__,
+        message=str(exc),
+        traceback=_tb.format_exc(),
+    )
 
 
 class VideoProcessorPipeline:
@@ -237,20 +249,13 @@ class VideoProcessorPipeline:
         """Process *source* and return a :class:`VideoProcessorResult`.
 
         All keyword arguments override the constructor defaults for this call only.
+        In ``safe_mode=True`` fatal stage errors are captured into
+        ``result.failed_stage`` / ``result.stage_errors`` and the pipeline
+        returns a partial result instead of raising.  Non-fatal stage errors
+        (transcription, analysis, summary) are always captured into
+        ``result.stage_errors`` so the pipeline continues with whatever data
+        is available.
         """
-        if self._safe_mode:
-            try:
-                return self._run_pipeline(source, locals())
-            except Exception as exc:  # noqa: BLE001
-                source_label = (
-                    str(source)
-                    if not isinstance(source, (bytes, bytearray))
-                    else "<bytes>"
-                )
-                return VideoProcessorResult(
-                    video_path=source_label,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
         return self._run_pipeline(source, locals())
 
     async def arun(
@@ -272,19 +277,6 @@ class VideoProcessorPipeline:
         user_id: Any = _UNSET,
     ) -> VideoProcessorResult:
         """Async variant of :meth:`run`."""
-        if self._safe_mode:
-            try:
-                return await self._arun_pipeline(source, locals())
-            except Exception as exc:  # noqa: BLE001
-                source_label = (
-                    str(source)
-                    if not isinstance(source, (bytes, bytearray))
-                    else "<bytes>"
-                )
-                return VideoProcessorResult(
-                    video_path=source_label,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
         return await self._arun_pipeline(source, locals())
 
     # ── Config resolution ────────────────────────────────────────────────────
@@ -346,6 +338,23 @@ class VideoProcessorPipeline:
 
     # ── Sync pipeline execution ──────────────────────────────────────────────
 
+    def _fatal_stage_result(
+        self,
+        label: str,
+        usage: VideoProcessorUsage,
+        stage_errors: list[StageError],
+        err: StageError,
+    ) -> VideoProcessorResult:
+        """Return a partial result when a fatal stage fails in safe_mode."""
+        all_errors = [*stage_errors, err]
+        return VideoProcessorResult(
+            video_path=label,
+            usage=usage,
+            failed_stage=err.stage,
+            stage_errors=all_errors,
+            error=str(err),
+        )
+
     def _run_pipeline(
         self,
         source: str | Path | bytes | list,
@@ -365,74 +374,129 @@ class VideoProcessorPipeline:
         cfg = self._resolved_config(call_kwargs)
         label = self._source_label(source)
         usage = VideoProcessorUsage()
+        stage_errors: list[StageError] = []
 
         self._check_rate_limit(cfg["user_id"])
 
-        # ── 1. Resolve source ────────────────────────────────────────────────
-        video_path, frame_paths = resolve_video_source(source)
+        # ── 1. Resolve source ── FATAL: nothing to process without a source ──
+        try:
+            video_path, frame_paths = resolve_video_source(source)
+        except Exception as exc:
+            err = _make_stage_error("load", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise RuntimeError(f"[Stage: load] {err.error_type}: {err.message}") from exc
 
-        # ── 2. Extract frames ────────────────────────────────────────────────
-        if frame_paths is not None:
-            # Pre-extracted frames — load from disk
-            raw_frames = load_frames_from_paths(
-                frame_paths, frame_format=self._frame_format
-            )
-        else:
-            raw_frames = extract_frames(
-                video_path,  # type: ignore[arg-type]
-                fps=cfg["fps"],
-                max_frames=cfg["max_frames"],
-                frame_format=self._frame_format,
-                max_process_workers=self._max_process_workers,
-            )
+        # ── 2. Extract frames ── FATAL: no frames = pipeline is meaningless ──
+        try:
+            if frame_paths is not None:
+                raw_frames = load_frames_from_paths(
+                    frame_paths, frame_format=self._frame_format
+                )
+            else:
+                raw_frames = extract_frames(
+                    video_path,  # type: ignore[arg-type]
+                    fps=cfg["fps"],
+                    max_frames=cfg["max_frames"],
+                    frame_format=self._frame_format,
+                    max_process_workers=self._max_process_workers,
+                )
+        except Exception as exc:
+            err = _make_stage_error("extract", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise RuntimeError(f"[Stage: extract] {err.error_type}: {err.message}") from exc
 
         usage.frames_extracted = len(raw_frames)
 
-        # ── 3. Deduplicate ───────────────────────────────────────────────────
-        frames = deduplicate_frames(
-            raw_frames,
-            similarity_threshold=cfg["similarity_threshold"],
-            method=cfg["dedup_method"],
-        )
+        # ── 3. Deduplicate ── FATAL: corrupted frame list is unrecoverable ───
+        try:
+            frames = deduplicate_frames(
+                raw_frames,
+                similarity_threshold=cfg["similarity_threshold"],
+                method=cfg["dedup_method"],
+            )
+        except Exception as exc:
+            err = _make_stage_error("deduplicate", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise RuntimeError(
+                f"[Stage: deduplicate] {err.error_type}: {err.message}"
+            ) from exc
+
         usage.frames_kept = sum(1 for f in frames if f.kept)
         usage.frames_discarded = sum(1 for f in frames if not f.kept)
 
-        # ── 4. Transcription ─────────────────────────────────────────────────
-        transcript = []
+        # ── 4. Transcription ── NON-FATAL: video still useful without audio ──
+        transcript: list = []
         if cfg["transcribe_audio"] and video_path is not None:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                fut = pool.submit(
-                    self._run_transcription,
-                    video_path,
-                    cfg["language"],
-                    usage,
-                )
-                transcript = fut.result()
-            transcript = align_frames_to_transcript(frames, transcript)
+            try:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    fut = pool.submit(
+                        self._run_transcription,
+                        video_path,
+                        cfg["language"],
+                        usage,
+                    )
+                    transcript = fut.result()
+                transcript = align_frames_to_transcript(frames, transcript)
+            except Exception as exc:
+                err = _make_stage_error("transcribe", exc)
+                stage_errors.append(err)
+                if not self._safe_mode:
+                    raise RuntimeError(
+                        f"[Stage: transcribe] {err.error_type}: {err.message}"
+                    ) from exc
 
-        # ── 5. Frame analysis ────────────────────────────────────────────────
+        # ── 5. Frame analysis ── NON-FATAL: frames still kept, just no LLM text
         if cfg["analyze_frames"]:
-            frames = analyze_frames_sync(
-                frames,
-                self._analysis_kit,
-                mode=cfg["frame_analysis_mode"],
-                batch_size=cfg["batch_size"],
-                max_workers=self._max_workers,
-                grid_size=cfg["grid_size"],
-                usage=usage,
-            )
+            try:
+                frames = analyze_frames_sync(
+                    frames,
+                    self._analysis_kit,
+                    mode=cfg["frame_analysis_mode"],
+                    batch_size=cfg["batch_size"],
+                    max_workers=self._max_workers,
+                    grid_size=cfg["grid_size"],
+                    usage=usage,
+                )
+            except Exception as exc:
+                err = _make_stage_error("analyze", exc)
+                stage_errors.append(err)
+                if not self._safe_mode:
+                    raise RuntimeError(
+                        f"[Stage: analyze] {err.error_type}: {err.message}"
+                    ) from exc
 
-        # ── 6. Build sections ────────────────────────────────────────────────
-        sections = build_sections(frames, transcript)
+        # ── 6. Build sections ── NON-FATAL: result still has frames + transcript
+        sections: list = []
+        try:
+            sections = build_sections(frames, transcript)
+        except Exception as exc:
+            err = _make_stage_error("build_sections", exc)
+            stage_errors.append(err)
+            if not self._safe_mode:
+                raise RuntimeError(
+                    f"[Stage: build_sections] {err.error_type}: {err.message}"
+                ) from exc
 
-        # ── 7. Summary ───────────────────────────────────────────────────────
+        # ── 7. Summary ── NON-FATAL: rest of result is still valid ───────────
         summary: str | None = None
         if cfg["generate_summary"]:
-            summary = generate_summary_sync(
-                sections, transcript, self._summary_kit, usage
-            )
+            try:
+                summary = generate_summary_sync(
+                    sections, transcript, self._summary_kit, usage
+                )
+            except Exception as exc:
+                err = _make_stage_error("summarize", exc)
+                stage_errors.append(err)
+                if not self._safe_mode:
+                    raise RuntimeError(
+                        f"[Stage: summarize] {err.error_type}: {err.message}"
+                    ) from exc
 
         # ── 8. Build result ──────────────────────────────────────────────────
+        top_error = str(stage_errors[0]) if stage_errors else None
         result = VideoProcessorResult(
             video_path=label,
             frames=frames,
@@ -440,14 +504,30 @@ class VideoProcessorPipeline:
             sections=sections,
             summary=summary,
             usage=usage,
+            stage_errors=stage_errors,
+            error=top_error,
         )
 
-        # ── 9. RAG storage ────────────────────────────────────────────────────
+        # ── 9. RAG storage ── NON-FATAL: indexing failure must not lose result
         if cfg["store_in_rag"] and self._rag_pipeline is not None:
-            count = store_result_in_rag(result, self._rag_pipeline)
-            result = result.model_copy(
-                update={"rag_stored": True, "rag_chunk_count": count}
-            )
+            try:
+                count = store_result_in_rag(result, self._rag_pipeline)
+                result = result.model_copy(
+                    update={"rag_stored": True, "rag_chunk_count": count}
+                )
+            except Exception as exc:
+                err = _make_stage_error("rag_store", exc)
+                if self._safe_mode:
+                    result = result.model_copy(
+                        update={
+                            "stage_errors": [*result.stage_errors, err],
+                            "error": result.error or str(err),
+                        }
+                    )
+                else:
+                    raise RuntimeError(
+                        f"[Stage: rag_store] {err.error_type}: {err.message}"
+                    ) from exc
 
         return result
 
@@ -486,82 +566,137 @@ class VideoProcessorPipeline:
         cfg = self._resolved_config(call_kwargs)
         label = self._source_label(source)
         usage = VideoProcessorUsage()
+        stage_errors: list[StageError] = []
         loop = asyncio.get_event_loop()
 
         self._check_rate_limit(cfg["user_id"])
 
-        # ── 1. Resolve source (potentially downloads) — in thread ────────────
-        video_path, frame_paths = await loop.run_in_executor(
-            None, resolve_video_source, source
-        )
+        # ── 1. Resolve source — in thread ── FATAL ───────────────────────────
+        try:
+            video_path, frame_paths = await loop.run_in_executor(
+                None, resolve_video_source, source
+            )
+        except Exception as exc:
+            err = _make_stage_error("load", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise RuntimeError(f"[Stage: load] {err.error_type}: {err.message}") from exc
 
-        # ── 2 & 3. Extract + deduplicate — CPU-bound, run in process pool ─────
-        def _extract_and_dedup() -> list:
+        # ── 2. Extract frames — CPU-bound, run in thread pool ── FATAL ────────
+        def _extract() -> list:
             if frame_paths is not None:
-                raw = load_frames_from_paths(
+                return load_frames_from_paths(
                     frame_paths, frame_format=self._frame_format
                 )
-            else:
-                raw = extract_frames(
-                    video_path,  # type: ignore[arg-type]
-                    fps=cfg["fps"],
-                    max_frames=cfg["max_frames"],
-                    frame_format=self._frame_format,
-                    max_process_workers=self._max_process_workers,
-                )
-            return raw
+            return extract_frames(
+                video_path,  # type: ignore[arg-type]
+                fps=cfg["fps"],
+                max_frames=cfg["max_frames"],
+                frame_format=self._frame_format,
+                max_process_workers=self._max_process_workers,
+            )
 
-        with ThreadPoolExecutor(max_workers=self._max_process_workers) as pool:
-            raw_frames = await loop.run_in_executor(pool, _extract_and_dedup)
+        try:
+            with ThreadPoolExecutor(max_workers=self._max_process_workers) as pool:
+                raw_frames = await loop.run_in_executor(pool, _extract)
+        except Exception as exc:
+            err = _make_stage_error("extract", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise RuntimeError(f"[Stage: extract] {err.error_type}: {err.message}") from exc
 
         usage.frames_extracted = len(raw_frames)
 
-        frames = await loop.run_in_executor(
-            None,
-            lambda: deduplicate_frames(
-                raw_frames,
-                similarity_threshold=cfg["similarity_threshold"],
-                method=cfg["dedup_method"],
-            ),
-        )
+        # ── 3. Deduplicate ── FATAL ───────────────────────────────────────────
+        try:
+            frames = await loop.run_in_executor(
+                None,
+                lambda: deduplicate_frames(
+                    raw_frames,
+                    similarity_threshold=cfg["similarity_threshold"],
+                    method=cfg["dedup_method"],
+                ),
+            )
+        except Exception as exc:
+            err = _make_stage_error("deduplicate", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise RuntimeError(
+                f"[Stage: deduplicate] {err.error_type}: {err.message}"
+            ) from exc
+
         usage.frames_kept = sum(1 for f in frames if f.kept)
         usage.frames_discarded = sum(1 for f in frames if not f.kept)
 
-        # ── 4. Transcription — blocking, run in thread ────────────────────────
-        transcript = []
+        # ── 4. Transcription — NON-FATAL ─────────────────────────────────────
+        transcript: list = []
         if cfg["transcribe_audio"] and video_path is not None:
-            transcript = await loop.run_in_executor(
-                None,
-                self._run_transcription,
-                video_path,
-                cfg["language"],
-                usage,
-            )
-            transcript = align_frames_to_transcript(frames, transcript)
+            try:
+                transcript = await loop.run_in_executor(
+                    None,
+                    self._run_transcription,
+                    video_path,
+                    cfg["language"],
+                    usage,
+                )
+                transcript = align_frames_to_transcript(frames, transcript)
+            except Exception as exc:
+                err = _make_stage_error("transcribe", exc)
+                stage_errors.append(err)
+                if not self._safe_mode:
+                    raise RuntimeError(
+                        f"[Stage: transcribe] {err.error_type}: {err.message}"
+                    ) from exc
 
-        # ── 5. Frame analysis — async gather ─────────────────────────────────
+        # ── 5. Frame analysis — NON-FATAL ─────────────────────────────────────
         if cfg["analyze_frames"]:
-            frames = await analyze_frames_async(
-                frames,
-                self._analysis_kit,
-                mode=cfg["frame_analysis_mode"],
-                batch_size=cfg["batch_size"],
-                max_workers=self._max_workers,
-                grid_size=cfg["grid_size"],
-                usage=usage,
-            )
+            try:
+                frames = await analyze_frames_async(
+                    frames,
+                    self._analysis_kit,
+                    mode=cfg["frame_analysis_mode"],
+                    batch_size=cfg["batch_size"],
+                    max_workers=self._max_workers,
+                    grid_size=cfg["grid_size"],
+                    usage=usage,
+                )
+            except Exception as exc:
+                err = _make_stage_error("analyze", exc)
+                stage_errors.append(err)
+                if not self._safe_mode:
+                    raise RuntimeError(
+                        f"[Stage: analyze] {err.error_type}: {err.message}"
+                    ) from exc
 
-        # ── 6. Build sections ─────────────────────────────────────────────────
-        sections = build_sections(frames, transcript)
+        # ── 6. Build sections — NON-FATAL ─────────────────────────────────────
+        sections: list = []
+        try:
+            sections = build_sections(frames, transcript)
+        except Exception as exc:
+            err = _make_stage_error("build_sections", exc)
+            stage_errors.append(err)
+            if not self._safe_mode:
+                raise RuntimeError(
+                    f"[Stage: build_sections] {err.error_type}: {err.message}"
+                ) from exc
 
-        # ── 7. Summary ────────────────────────────────────────────────────────
+        # ── 7. Summary — NON-FATAL ────────────────────────────────────────────
         summary: str | None = None
         if cfg["generate_summary"]:
-            summary = await generate_summary_async(
-                sections, transcript, self._summary_kit, usage
-            )
+            try:
+                summary = await generate_summary_async(
+                    sections, transcript, self._summary_kit, usage
+                )
+            except Exception as exc:
+                err = _make_stage_error("summarize", exc)
+                stage_errors.append(err)
+                if not self._safe_mode:
+                    raise RuntimeError(
+                        f"[Stage: summarize] {err.error_type}: {err.message}"
+                    ) from exc
 
         # ── 8. Build result ───────────────────────────────────────────────────
+        top_error = str(stage_errors[0]) if stage_errors else None
         result = VideoProcessorResult(
             video_path=label,
             frames=frames,
@@ -569,14 +704,30 @@ class VideoProcessorPipeline:
             sections=sections,
             summary=summary,
             usage=usage,
+            stage_errors=stage_errors,
+            error=top_error,
         )
 
-        # ── 9. RAG storage ────────────────────────────────────────────────────
+        # ── 9. RAG storage — NON-FATAL ────────────────────────────────────────
         if cfg["store_in_rag"] and self._rag_pipeline is not None:
-            count = await store_result_in_rag_async(result, self._rag_pipeline)
-            result = result.model_copy(
-                update={"rag_stored": True, "rag_chunk_count": count}
-            )
+            try:
+                count = await store_result_in_rag_async(result, self._rag_pipeline)
+                result = result.model_copy(
+                    update={"rag_stored": True, "rag_chunk_count": count}
+                )
+            except Exception as exc:
+                err = _make_stage_error("rag_store", exc)
+                if self._safe_mode:
+                    result = result.model_copy(
+                        update={
+                            "stage_errors": [*result.stage_errors, err],
+                            "error": result.error or str(err),
+                        }
+                    )
+                else:
+                    raise RuntimeError(
+                        f"[Stage: rag_store] {err.error_type}: {err.message}"
+                    ) from exc
 
         return result
 

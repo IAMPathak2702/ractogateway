@@ -34,5 +34,5 @@ def apply_chain_of_thought(prompt: RactoPrompt) -> RactoPrompt:
         A new instance with the CoT constraint added.
     """
     return prompt.model_copy(
-        update={"constraints": list(prompt.constraints) + [_COT_CONSTRAINT]}
+        update={"constraints": [*list(prompt.constraints), _COT_CONSTRAINT]}
     )
