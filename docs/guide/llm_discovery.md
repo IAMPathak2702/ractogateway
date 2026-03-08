@@ -49,7 +49,7 @@ artifact via `html_extra_path`.
 python -m sphinx -b html docs docs/_build/validate -W --keep-going -n
 ```
 
-4. Deploy docs and verify these URLs return HTTP 200:
+1. Deploy docs and verify these URLs return HTTP 200:
    - `/llms.txt`
    - `/llms-full.txt`
    - `/robots.txt`

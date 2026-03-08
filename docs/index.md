@@ -114,7 +114,7 @@ not just a chat wrapper.
 from pydantic import BaseModel
 from ractogateway import openai_developer_kit as gpt
 from ractogateway.pipelines import ListClassifierPipeline
-from ractogateway.redis import RedisExactCache, RedisChatMemory
+from ractogateway.redis import RedisExactCache
 
 class SupportReply(BaseModel):
     route: str
@@ -125,7 +125,9 @@ classifier = ListClassifierPipeline(
     kit=gpt.Chat(model="gpt-4o-mini"),
     options=["Billing", "Technical Support", "Account", "Sales"],
 )
-route = classifier.run("My invoice is wrong and payment failed").first
+ticket = "My invoice is wrong and payment failed"
+route = classifier.run(ticket).first or "Billing"
+print("Predicted route:", route)
 
 kit = gpt.Chat(
     model="gpt-4o",
@@ -133,10 +135,25 @@ kit = gpt.Chat(
 )
 result = kit.chat(
     gpt.ChatConfig(
-        user_message="Resolve this ticket with account-safe steps.",
+        user_message=(
+            f"Customer ticket: {ticket}\n"
+            f"Predicted team route: {route}\n"
+            "Resolve this ticket with account-safe steps."
+        ),
         response_model=SupportReply,
     )
 )
+parsed = result.parsed
+print("Final route:", parsed.route)
+print("Reply:", parsed.reply)
+print("Escalate:", parsed.escalate)
+```
+
+```text
+Predicted route: Billing
+Final route: Billing
+Reply: I can help with this billing issue. I will verify invoice line-items and retry payment safely.
+Escalate: False
 ```
 
 ### 2) BI Analyst Copilot
@@ -158,8 +175,13 @@ result = pipeline.run(
     user_query="Top 10 products by revenue growth this quarter",
     connection_string="postgresql://user:pass@localhost:5432/warehouse",
 )
-print(result.sql_query)
-print(result.answer)
+print("SQL:", result.sql_query)
+print("Answer:", result.answer)
+```
+
+```text
+SQL: SELECT product_name, growth_pct FROM quarterly_growth ORDER BY growth_pct DESC LIMIT 10;
+Answer: The top growth products this quarter are Product A, Product B, and Product C, led by strong repeat purchases.
 ```
 
 ### 3) Internal Knowledge Assistant (Policies, SOPs, Engineering Docs)
@@ -188,6 +210,10 @@ response = rag.query("What is our production incident escalation policy?", top_k
 print(response.answer)
 ```
 
+```text
+P1 incidents must be acknowledged within 5 minutes, incident commander assigned immediately, and stakeholder updates posted every 15 minutes until resolution.
+```
+
 ### 4) Video Learning Intelligence
 
 **Business goal:** Convert training recordings into searchable, reusable knowledge.
@@ -210,6 +236,12 @@ video = VideoProcessorPipeline(
 )
 report = video.run("onboarding_session.mp4")
 print(report.summary)
+print("Sections:", len(report.sections))
+```
+
+```text
+This onboarding covers architecture basics, deployment flow, and incident response ownership.
+Sections: 6
 ```
 
 ### 5) Agentic Operations Automation
@@ -237,6 +269,12 @@ agent = AgentPipeline(
 )
 result = agent.run("Check stock for SKU-4481 and suggest reorder action.")
 print(result.final_answer)
+print("Stop reason:", result.stop_reason)
+```
+
+```text
+SKU-4481 has 42 units in stock. Recommend reorder trigger at 20 units with a purchase order draft prepared now.
+Stop reason: finish_tool
 ```
 
 ### 6) Cost-Controlled Multi-Provider Delivery
