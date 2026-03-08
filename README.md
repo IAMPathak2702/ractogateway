@@ -2,7 +2,7 @@
 
 **One Python package for all production-grade LLM solutions.**
 
-RactoGateway is a unified AI SDK that gives you a single, clean interface to OpenAI, Google Gemini, and Anthropic Claude — with built-in anti-hallucination prompting, strict Pydantic validation, streaming, tool calling, embeddings, fine-tuning, and a full RAG pipeline. No more messy JSON dicts. No more provider lock-in. No more inconsistent response formats.
+RactoGateway is a unified AI SDK that gives you a single, clean interface to OpenAI, Google Gemini, Anthropic Claude, Ollama (local), and HuggingFace. It includes anti-hallucination prompting, strict Pydantic validation, streaming, tool calling, embeddings, fine-tuning, RAG, prebuilt workflows, and production operations in one package. No more provider lock-in. No more inconsistent response formats. No more fragile glue code.
 
 [![PyPI version](https://img.shields.io/pypi/v/ractogateway.svg)](https://pypi.org/project/ractogateway/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
@@ -16,6 +16,8 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 - [Why RactoGateway?](#why-ractogateway)
   - [Use-Case Map](#use-case-map)
   - [Why It Stands Different](#why-it-stands-different)
+  - [Platform Architecture](#platform-architecture)
+  - [End-to-End Delivery Pipeline](#end-to-end-delivery-pipeline)
 - [Installation](#installation)
 - [5-Line Quick Start](#5-line-quick-start)
 - [RACTO Prompt Engine](#racto-prompt-engine)
@@ -38,6 +40,8 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
 - [Prebuilt Pipelines](#prebuilt-pipelines)
   - [SQLAnalystPipeline](#sqlanalystpipeline)
   - [ListClassifierPipeline](#listclassifierpipeline)
+  - [VideoProcessorPipeline](#videoprocessorpipeline)
+  - [AgentPipeline](#agentpipeline)
 - [Performance & Cost Optimization](#performance--cost-optimization)
   - [Exact-Match Cache](#exact-match-cache)
   - [Semantic Cache](#semantic-cache)
@@ -67,7 +71,7 @@ Every LLM provider has a different SDK, different request format, different resp
 RactoGateway solves this by providing:
 
 - **RACTO Prompt Engine** — a structured prompt framework (Role, Aim, Constraints, Tone, Output) that compiles into optimized, anti-hallucination system prompts
-- **Three Developer Kits** — `gpt` (OpenAI), `gemini` (Google), `claude` (Anthropic) — each with `chat()`, `achat()`, `stream()`, `astream()`, `embed()`, and `aembed()`
+- **Five Developer Kits** — `gpt` (OpenAI), `gemini` (Google), `claude` (Anthropic), `local` (Ollama), and `hf` (HuggingFace) — each with `chat()`, `achat()`, `stream()`, `astream()`, `embed()`, and `aembed()`
 - **Strict Pydantic models** for every input and output — no raw dicts anywhere
 - **Automatic JSON parsing** — responses are cleaned of markdown fences and auto-parsed
 - **Unified tool calling** — define tools once as Python functions, use them with any provider
@@ -75,6 +79,7 @@ RactoGateway solves this by providing:
 - **Chain of Thoughts** — `ChatConfig(chain_of_thought=True)` injects step-by-step reasoning into the system prompt across all five provider kits
 - **RAG pipeline** — ingest files, embed, store, retrieve, and generate answers with one class
 - **PageIndexRAG** — vectorless, page-level BM25 RAG; no embedding API, no vector store — pure Python decision-tree + Okapi BM25 retrieval
+- **Four prebuilt pipelines** — SQL analytics, list classification, agentic tool loops, and video intelligence workflows with sync/async APIs
 - **Low-level Gateway** — wraps any adapter for direct prompt execution without `ChatConfig`
 - **Exact-match cache** — SHA-256 LRU cache eliminates duplicate API calls with zero latency
 - **Semantic cache** — cosine-similarity cache returns cached answers for semantically equivalent queries
@@ -119,6 +124,34 @@ RactoGateway is different because it combines provider abstraction, strict typin
 | End-to-end RAG | Stitch multiple libraries together | One orchestrator with swappable readers/stores/embedders | Shorter path from idea to working RAG |
 | Scale and operations | Teams bolt infra on later | Redis, Celery, batching, routing, and caching are first-class | Better cost, reliability, and throughput from day one |
 | Extensibility | Hard to mix low-level and high-level APIs | High-level kits plus low-level gateway in the same architecture | Use simple APIs first, drop lower only where needed |
+
+### Platform Architecture
+
+RactoGateway is designed as one composable stack rather than disconnected helper utilities:
+
+| Layer | Primary modules | Responsibilities |
+| --- | --- | --- |
+| Prompt + guardrails | `RactoPrompt`, `RactoFile` | Role/aim/constraints/tone/output control, anti-hallucination defaults, multimodal message composition |
+| Provider abstraction | `openai_developer_kit`, `google_developer_kit`, `anthropic_developer_kit`, `ollama_developer_kit`, `huggingface_developer_kit` | Unified chat/stream/embed APIs across cloud and local providers |
+| Tool runtime | `ToolRegistry`, `tool`, runtime adapters | Register Python callables once and execute tool calls through a normalized interface |
+| Output safety | `response_model`, strict validation | Parse and validate model output into typed Pydantic objects |
+| Retrieval | `RactoRAG`, `PageIndexRAG`, readers/chunkers/embedders/stores | Document ingestion, indexing, retrieval, and grounded answer generation |
+| Turn-key workflows | `pipelines` package | SQL analyst, list classifier, video processor, and ReAct-style agent pipelines |
+| Cost + throughput | `cache`, `routing`, `truncation`, `batch` | Cache hits, auto model routing, context trimming, and bulk provider jobs |
+| Ops + scale | `redis`, `celery`, `kafka`, `mcp`, `telemetry` | Distributed cache/memory/rate limits, background workers, event transport, MCP interoperability, observability |
+
+### End-to-End Delivery Pipeline
+
+A typical production flow with RactoGateway looks like this:
+
+1. Define behavior with `RactoPrompt` and optional output schema (`BaseModel`).
+2. Select provider at runtime using any developer kit without changing business logic.
+3. Execute request with typed config (`ChatConfig`, `EmbeddingConfig`) and optional streaming.
+4. Run tools when needed through `ToolRegistry` (uniform across providers).
+5. Ground answers with retrieval (`RactoRAG` or `PageIndexRAG`) when your use case depends on private docs.
+6. Promote common business tasks to a prebuilt pipeline (`SQLAnalystPipeline`, `ListClassifierPipeline`, `VideoProcessorPipeline`, `AgentPipeline`).
+7. Add cost and reliability controls (`ExactMatchCache`, `SemanticCache`, `CostAwareRouter`, `TokenTruncator`, batch APIs).
+8. Scale safely with Redis infrastructure, Celery workers, Kafka streams, and MCP-compatible tool ecosystems.
 
 ---
 
@@ -2485,8 +2518,16 @@ If no candidates are found via the index (very short or stop-word-only queries),
 
 ## Prebuilt Pipelines
 
-RactoGateway includes prebuilt, production-focused pipeline classes for common
-LLM workflows.
+RactoGateway includes production-ready, end-to-end pipeline classes for common
+AI workflows. Each pipeline wraps prompting, validation, retries, telemetry,
+and structured outputs behind simple `run()` / `arun()` entry points.
+
+| Pipeline | Primary classes | What it automates | Best for |
+| --- | --- | --- | --- |
+| SQL Analyst | `SQLAnalystPipeline`, `AsyncSQLAnalystPipeline` | NL -> SQL -> execution -> analysis -> answer (+ optional chart) | BI copilots, analytics assistants, data ops |
+| List Classifier | `ListClassifierPipeline`, `AsyncListClassifierPipeline` | NL text -> best option(s) from `list[str]` with confidence | Ticket routing, intent detection, queue triage |
+| Video Processor | `VideoProcessorPipeline`, `AsyncVideoProcessorPipeline` | Video -> frames + transcription + vision analysis + summary (+ optional RAG writeback) | Lecture indexing, training QA, media intelligence |
+| Agent | `AgentPipeline`, `AsyncAgentPipeline` | ReAct loop: reason -> call tool -> observe -> repeat until finish | Tool-using assistants, research automation, multi-step workflows |
 
 ### SQLAnalystPipeline
 
@@ -2530,11 +2571,71 @@ result = classifier.run("I was charged twice for my plan")
 print(result.first, result.top_confidence)
 ```
 
+### VideoProcessorPipeline
+
+`VideoProcessorPipeline` (and `AsyncVideoProcessorPipeline`) processes video
+content into structured artifacts:
+
+1. Frame extraction + deduplication
+2. Audio transcription (multiple backends)
+3. Vision-model analysis per frame/segment
+4. Sectioned summary generation
+5. Optional RAG indexing for downstream Q&A
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.pipelines import VideoProcessorPipeline, TranscriberBackend
+
+pipeline = VideoProcessorPipeline(
+    kit=gpt.Chat(model="gpt-4o"),
+    fps=1.0,
+    transcriber=TranscriberBackend.FASTER_WHISPER,
+    generate_summary=True,
+    safe_mode=True,
+)
+
+result = pipeline.run("team_training_session.mp4")
+print(result.summary)
+print(len(result.segments))
+```
+
+### AgentPipeline
+
+`AgentPipeline` (and `AsyncAgentPipeline`) runs autonomous tool loops with a
+bounded step budget:
+
+1. Model reasons about next action
+2. Chooses a tool and arguments
+3. Executes tool and observes output
+4. Repeats until `finish()` or `max_steps`
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.pipelines import AgentPipeline
+
+def get_weather(city: str) -> str:
+    """Return the current weather for a city."""
+    return f"Sunny, 22 C in {city}"
+
+agent = AgentPipeline(
+    kit=gpt.Chat(model="gpt-4o-mini"),
+    tools=[get_weather],
+    max_steps=6,
+    safe_mode=True,
+)
+
+result = agent.run("Should I carry an umbrella in Paris today?")
+print(result.final_answer)
+print(result.stop_reason)
+```
+
 For full usage patterns, configuration options, and async examples:
 
 - [Pipelines guide](docs/guide/pipelines.md)
 - [SQL Analyst pipeline guide](docs/guide/pipelines/sql_analyst.md)
 - [List Classifier pipeline guide](docs/guide/pipelines/list_classifier.md)
+- [Video Processor pipeline guide](docs/guide/pipelines/video_processor.md)
+- [Agent pipeline guide](docs/guide/pipelines/agent.md)
 
 ---
 
