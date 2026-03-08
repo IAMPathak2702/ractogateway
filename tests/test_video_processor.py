@@ -774,6 +774,61 @@ class TestVideoProcessorPipelineIntegration:
         # kit.chat called for analysis; usage mock returns 100 in + 50 out
         assert result.error is None
 
+    def test_analysis_prompt_is_valid_against_racto_prompt_schema(
+        self, tmp_path: Path
+    ) -> None:
+        """Analysis stage should not fail prompt validation (e.g., missing tone)."""
+        f = tmp_path / "v.mp4"
+        f.write_bytes(b"x")
+        kit = _make_kit_mock("Detected board content")
+
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor.extract_frames",
+            return_value=_make_raw_frames(1),
+        ), patch(
+            "ractogateway.pipelines.video_processor._extractor._phash_similarity",
+            return_value=0.0,
+        ):
+            pipeline = _make_pipeline(
+                kit=kit,
+                safe_mode=True,
+                transcribe_audio=False,
+                analyze_frames=True,
+                generate_summary=False,
+            )
+            result = pipeline.run(str(f))
+
+        assert result.error is None
+        assert all(err.stage != "analyze" for err in result.stage_errors)
+
+    def test_summary_prompt_is_valid_against_racto_prompt_schema(
+        self, tmp_path: Path
+    ) -> None:
+        """Summary stage should not fail prompt validation (e.g., missing tone)."""
+        f = tmp_path / "v.mp4"
+        f.write_bytes(b"x")
+        kit = _make_kit_mock("Structured summary")
+
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor.extract_frames",
+            return_value=_make_raw_frames(1),
+        ), patch(
+            "ractogateway.pipelines.video_processor._extractor._phash_similarity",
+            return_value=0.0,
+        ):
+            pipeline = _make_pipeline(
+                kit=kit,
+                safe_mode=True,
+                transcribe_audio=False,
+                analyze_frames=False,
+                generate_summary=True,
+            )
+            result = pipeline.run(str(f))
+
+        assert result.error is None
+        assert result.summary == "Structured summary"
+        assert all(err.stage != "summarize" for err in result.stage_errors)
+
     def test_summary_generated_from_sections(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

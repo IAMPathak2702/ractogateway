@@ -376,7 +376,13 @@ class VideoProcessorPipeline:
         usage = VideoProcessorUsage()
         stage_errors: list[StageError] = []
 
-        self._check_rate_limit(cfg["user_id"])
+        try:
+            self._check_rate_limit(cfg["user_id"])
+        except Exception as exc:
+            err = _make_stage_error("rate_limit", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise
 
         # ── 1. Resolve source ── FATAL: nothing to process without a source ──
         try:
@@ -385,7 +391,7 @@ class VideoProcessorPipeline:
             err = _make_stage_error("load", exc)
             if self._safe_mode:
                 return self._fatal_stage_result(label, usage, stage_errors, err)
-            raise RuntimeError(f"[Stage: load] {err.error_type}: {err.message}") from exc
+            raise
 
         # ── 2. Extract frames ── FATAL: no frames = pipeline is meaningless ──
         try:
@@ -569,7 +575,13 @@ class VideoProcessorPipeline:
         stage_errors: list[StageError] = []
         loop = asyncio.get_event_loop()
 
-        self._check_rate_limit(cfg["user_id"])
+        try:
+            self._check_rate_limit(cfg["user_id"])
+        except Exception as exc:
+            err = _make_stage_error("rate_limit", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise
 
         # ── 1. Resolve source — in thread ── FATAL ───────────────────────────
         try:
@@ -580,7 +592,7 @@ class VideoProcessorPipeline:
             err = _make_stage_error("load", exc)
             if self._safe_mode:
                 return self._fatal_stage_result(label, usage, stage_errors, err)
-            raise RuntimeError(f"[Stage: load] {err.error_type}: {err.message}") from exc
+            raise
 
         # ── 2. Extract frames — CPU-bound, run in thread pool ── FATAL ────────
         def _extract() -> list:

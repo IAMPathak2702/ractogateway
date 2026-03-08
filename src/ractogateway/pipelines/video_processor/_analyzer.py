@@ -146,6 +146,7 @@ def _analyze_single_frame_sync(frame: FrameEntry, kit: Any) -> tuple[str, dict]:
         role="vision analysis assistant",
         aim=_FRAME_ANALYSIS_PROMPT,
         constraints=["Be concise but complete", "Copy text verbatim -- do not paraphrase"],
+        tone="Professional and factual.",
         output_format="Structured plain text with labelled sections",
     )
 
@@ -184,6 +185,7 @@ def _analyze_grid_sync(
             "Label each frame as 'Frame 1', 'Frame 2', etc.",
             "Copy all text/equations verbatim",
         ],
+        tone="Professional and factual.",
         output_format="Structured plain text, one section per frame",
     )
 
@@ -211,6 +213,7 @@ async def _analyze_single_frame_async(frame: FrameEntry, kit: Any) -> tuple[str,
         role="vision analysis assistant",
         aim=_FRAME_ANALYSIS_PROMPT,
         constraints=["Be concise but complete", "Copy text verbatim -- do not paraphrase"],
+        tone="Professional and factual.",
         output_format="Structured plain text with labelled sections",
     )
 

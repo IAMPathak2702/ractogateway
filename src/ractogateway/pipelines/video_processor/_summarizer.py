@@ -94,6 +94,7 @@ def generate_summary_sync(
             "Organise by the 7 numbered sections listed above",
             "Use Markdown formatting with headers and bullet points",
         ],
+        tone="Professional and comprehensive.",
         output_format="A structured Markdown document with all 7 required sections",
         context=context,
     )
@@ -126,6 +127,7 @@ async def generate_summary_async(
             "Organise by the 7 numbered sections listed above",
             "Use Markdown formatting with headers and bullet points",
         ],
+        tone="Professional and comprehensive.",
         output_format="A structured Markdown document with all 7 required sections",
         context=context,
     )
