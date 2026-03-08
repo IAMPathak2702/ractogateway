@@ -245,6 +245,7 @@ pipeline = VideoProcessorPipeline(kit=kit, transcribe_audio=False)
 ## Vision LLM Analysis
 
 Every kept frame is passed to a vision-capable model to extract:
+
 1. All text/equations written on the whiteboard or blackboard (copied verbatim)
 2. All text, code, or diagrams visible on screen
 3. A brief description of the scene
@@ -363,6 +364,7 @@ print(answer)
 ```
 
 Stored chunks include:
+
 - One document per `VideoSection` (visual + audio merged)
 - One document per transcript segment (audio-only retrieval)
 - One document for the full summary
