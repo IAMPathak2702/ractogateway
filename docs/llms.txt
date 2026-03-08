@@ -1,0 +1,38 @@
+# RactoGateway
+> One Python package for production-grade AI development.
+> Last updated: 2026-03-08
+
+## Canonical Documentation
+
+- https://ractogateway.readthedocs.io/en/latest/index.html : Docs homepage and architecture overview.
+- https://ractogateway.readthedocs.io/en/latest/installation.html : Installation and extras.
+- https://ractogateway.readthedocs.io/en/latest/quickstart.html : Fastest end-to-end start.
+
+## Core Guides
+
+- https://ractogateway.readthedocs.io/en/latest/guide/developer_kits.html : Unified provider kits.
+- https://ractogateway.readthedocs.io/en/latest/guide/prompt_engine.html : RACTO prompt structure.
+- https://ractogateway.readthedocs.io/en/latest/guide/tools.html : ToolRegistry and tool calling.
+- https://ractogateway.readthedocs.io/en/latest/guide/streaming.html : Streaming and async patterns.
+- https://ractogateway.readthedocs.io/en/latest/guide/rag.html : RAG and PageIndexRAG.
+- https://ractogateway.readthedocs.io/en/latest/guide/pipelines.html : SQL, classifier, video, and agent pipelines.
+- https://ractogateway.readthedocs.io/en/latest/guide/llm_discovery.html : LLM discovery strategy.
+
+## Production Guides
+
+- https://ractogateway.readthedocs.io/en/latest/guide/cache.html : Exact and semantic cache.
+- https://ractogateway.readthedocs.io/en/latest/guide/routing.html : Cost-aware model routing.
+- https://ractogateway.readthedocs.io/en/latest/guide/truncation.html : Token truncation controls.
+- https://ractogateway.readthedocs.io/en/latest/guide/redis.html : Distributed cache/memory/rate limit.
+- https://ractogateway.readthedocs.io/en/latest/guide/celery.html : Background jobs and retries.
+- https://ractogateway.readthedocs.io/en/latest/guide/kafka.html : Event-driven integration.
+- https://ractogateway.readthedocs.io/en/latest/guide/mcp.html : MCP server/client integration.
+
+## API Reference
+
+- https://ractogateway.readthedocs.io/en/latest/api/index.html : API entry point.
+
+## Package Metadata
+
+- PyPI: https://pypi.org/project/ractogateway/
+- Source: https://github.com/IAMPathak2702/RactoGateway

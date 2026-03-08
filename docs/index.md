@@ -258,6 +258,7 @@ Result: one codebase, provider flexibility, and predictable cost envelopes as us
 - Building assistants and APIs: see [Developer Kits](guide/developer_kits.md), [Prompt Engine](guide/prompt_engine.md), and [Tools](guide/tools.md).
 - Building retrieval systems: see [RAG](guide/rag.md), [Embeddings](guide/embeddings.md), and [Pipelines](guide/pipelines.md).
 - Running in production: see [Cache](guide/cache.md), [Routing](guide/routing.md), [Redis](guide/redis.md), [Celery](guide/celery.md), [Kafka](guide/kafka.md), and [MCP](guide/mcp.md).
+- Improving LLM discoverability: see [LLM Discovery Guide](guide/llm_discovery.md) and root files `llms.txt`, `llms-full.txt`, and `robots.txt`.
 
 ```{toctree}
 :maxdepth: 2
@@ -272,6 +273,7 @@ quickstart
 :caption: User Guide
 
 guide/userguide
+guide/llm_discovery
 guide/prompt_engine
 guide/developer_kits
 guide/ollama

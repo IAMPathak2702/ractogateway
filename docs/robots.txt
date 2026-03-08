@@ -1,0 +1,34 @@
+# robots.txt for RactoGateway docs
+# Last updated: 2026-03-08
+#
+# This file is a visibility-forward baseline. Adjust based on your
+# legal/data policy for model training and indexing.
+
+User-agent: *
+Allow: /
+
+# OpenAI
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+# Anthropic
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+# Google AI
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Google-CloudVertexBot
+Allow: /
+
+Sitemap: https://ractogateway.readthedocs.io/sitemap.xml

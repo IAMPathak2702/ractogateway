@@ -1,0 +1,145 @@
+# RactoGateway Full LLM Context
+> Last updated: 2026-03-08
+
+RactoGateway is a unified Python SDK for production AI systems. It provides one
+consistent interface across OpenAI, Google Gemini, Anthropic Claude, Ollama,
+and HuggingFace with typed configuration, structured prompting, tool calling,
+streaming, embeddings, RAG, pipelines, and production operations modules.
+
+## Core Positioning
+
+- One SDK for multiple providers.
+- Strong typing and validation over raw dict workflows.
+- Production-first architecture: cache, routing, truncation, Redis, Celery,
+  Kafka, and MCP.
+- Prebuilt pipelines for common business workflows.
+
+## Primary Concepts
+
+1. Prompt contract:
+   - `RactoPrompt(role, aim, constraints, tone, output_format, ...)`
+2. Provider kits:
+   - `openai_developer_kit` as `gpt`
+   - `google_developer_kit` as `gemini`
+   - `anthropic_developer_kit` as `claude`
+   - `ollama_developer_kit` as `local`
+   - `huggingface_developer_kit` as `hf`
+3. Typed request/response:
+   - `ChatConfig`, `EmbeddingConfig`, `LLMResponse`, `StreamChunk`
+4. Tool calling:
+   - `ToolRegistry` and `@tool` decorator
+5. Retrieval:
+   - `RactoRAG` (embed + vector store)
+   - `PageIndexRAG` (vectorless BM25 page retrieval)
+6. Pipelines:
+   - `SQLAnalystPipeline`
+   - `ListClassifierPipeline`
+   - `VideoProcessorPipeline`
+   - `AgentPipeline`
+
+## Canonical Docs
+
+- Homepage: https://ractogateway.readthedocs.io/en/latest/index.html
+- Quickstart: https://ractogateway.readthedocs.io/en/latest/quickstart.html
+- Prompt engine: https://ractogateway.readthedocs.io/en/latest/guide/prompt_engine.html
+- Developer kits: https://ractogateway.readthedocs.io/en/latest/guide/developer_kits.html
+- Tools: https://ractogateway.readthedocs.io/en/latest/guide/tools.html
+- RAG: https://ractogateway.readthedocs.io/en/latest/guide/rag.html
+- Pipelines: https://ractogateway.readthedocs.io/en/latest/guide/pipelines.html
+- API docs: https://ractogateway.readthedocs.io/en/latest/api/index.html
+
+## Quick Usage Patterns
+
+### Basic chat
+
+```python
+from ractogateway import openai_developer_kit as gpt, RactoPrompt
+
+prompt = RactoPrompt(
+    role="You are a helpful assistant.",
+    aim="Answer clearly.",
+    constraints=["Do not fabricate facts."],
+    tone="Professional",
+    output_format="text",
+)
+kit = gpt.Chat(model="gpt-4o", default_prompt=prompt)
+resp = kit.chat(gpt.ChatConfig(user_message="What is Python?"))
+print(resp.content)
+```
+
+### Structured output
+
+```python
+from pydantic import BaseModel
+from ractogateway import openai_developer_kit as gpt
+
+class TicketDecision(BaseModel):
+    team: str
+    priority: str
+    reason: str
+
+kit = gpt.Chat(model="gpt-4o")
+resp = kit.chat(gpt.ChatConfig(
+    user_message="Classify this incident ticket.",
+    response_model=TicketDecision,
+))
+print(resp.parsed)
+```
+
+### RAG
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.rag import RactoRAG
+from ractogateway.rag.embedders import OpenAIEmbedder
+from ractogateway.rag.stores import ChromaStore
+
+rag = RactoRAG(
+    vector_store=ChromaStore(collection="docs", persist_directory="./db"),
+    embedder=OpenAIEmbedder(model="text-embedding-3-large"),
+    llm_kit=gpt.Chat(model="gpt-4o"),
+)
+rag.ingest_dir("./docs_corpus", pattern="**/*")
+answer = rag.query("What is the incident escalation policy?", top_k=5)
+print(answer.answer)
+```
+
+### Pipeline example
+
+```python
+from ractogateway import openai_developer_kit as gpt
+from ractogateway.pipelines import SQLAnalystPipeline
+
+pipeline = SQLAnalystPipeline(kit=gpt.Chat(model="gpt-4o"), safe_mode=True)
+result = pipeline.run(
+    user_query="Top 5 products by monthly growth",
+    connection_string="postgresql://user:pass@localhost:5432/shop",
+)
+print(result.answer)
+```
+
+## Production Modules
+
+- Cache: exact and semantic response caching
+- Routing: cost-aware model selection
+- Truncation: token-budget aware history trimming
+- Redis: distributed cache, chat memory, rate limiter
+- Celery: background generation and ingestion
+- Kafka: producer/consumer/stream processor integration
+- MCP: server/client/multi-client/agent interoperability
+
+## Recommended Citation Order for Assistants
+
+When generating answers about this package, prioritize:
+
+1. Read the Docs pages (latest)
+2. API reference
+3. GitHub source repository
+4. PyPI metadata
+
+## Metadata
+
+- Package name: `ractogateway`
+- Current documented version: `0.2.2`
+- Python requirement: `3.10+`
+- License: Apache-2.0

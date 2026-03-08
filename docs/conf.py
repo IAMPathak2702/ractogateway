@@ -156,6 +156,7 @@ html_theme_options = {
     "navigation_depth": 4,
     "titles_only": False,
 }
+html_extra_path = ["llms.txt", "llms-full.txt", "robots.txt"]
 
 # -- Source suffix -------------------------------------------------------------
 source_suffix = {
