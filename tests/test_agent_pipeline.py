@@ -42,6 +42,7 @@ def _make_response(text: str, input_tokens: int = 10, output_tokens: int = 5) ->
     """Build a fake LLM response object."""
     resp = MagicMock()
     resp.text = text
+    resp.content = text
     resp.usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
     return resp
 
@@ -353,36 +354,43 @@ class TestMakeMemoryTools:
 class TestParseResponse:
     def test_pure_json(self) -> None:
         text = '{"thought": "ok", "tool_name": "add", "tool_input": {"a": 1, "b": 2}}'
-        thought, tool, inp = _parse_response(text)
+        thought, calls = _parse_response(text)
         assert thought == "ok"
+        assert len(calls) == 1
+        tool, inp = calls[0]
         assert tool == "add"
         assert inp == {"a": 1, "b": 2}
 
     def test_markdown_fence(self) -> None:
         text = '```json\n{"thought": "t", "tool_name": "finish", "tool_input": {"answer": "done"}}\n```'
-        _thought, tool, inp = _parse_response(text)
+        _thought, calls = _parse_response(text)
+        tool, inp = calls[0]
         assert tool == "finish"
         assert inp["answer"] == "done"
 
     def test_embedded_json(self) -> None:
         text = 'Here is my action:\n{"thought": "x", "tool_name": "foo", "tool_input": {}}\nDone.'
-        _, tool, _ = _parse_response(text)
+        _, calls = _parse_response(text)
+        tool, _inp = calls[0]
         assert tool == "foo"
 
     def test_malformed_fallback(self) -> None:
         text = "This is not JSON at all"
-        _thought, tool, inp = _parse_response(text)
+        _thought, calls = _parse_response(text)
+        tool, inp = calls[0]
         assert tool == FINISH_TOOL
         assert text in inp.get("answer", "")
 
     def test_non_dict_tool_input_coerced(self) -> None:
         text = '{"thought": "t", "tool_name": "foo", "tool_input": "just a string"}'
-        _, _tool, inp = _parse_response(text)
+        _, calls = _parse_response(text)
+        _tool, inp = calls[0]
         assert isinstance(inp, dict)
 
     def test_missing_thought(self) -> None:
         text = '{"tool_name": "finish", "tool_input": {"answer": "x"}}'
-        thought, tool, _ = _parse_response(text)
+        thought, calls = _parse_response(text)
+        tool, _inp = calls[0]
         assert thought is None
         assert tool == "finish"
 
@@ -523,9 +531,14 @@ class TestAgentPipelineSync:
         assert result.usage.steps_taken == 2
 
     def test_max_steps_reached(self) -> None:
-        # Keeps calling a tool forever — never calls finish
-        resp = _json_action("Thinking...", "tool_a")
-        agent = self._make_agent([resp], max_steps=3)
+        # Keeps calling a known tool forever — never calls finish.
+        # Use a registered tool so no errors occur (avoids circuit breaker).
+        def noop(x: str = "") -> str:
+            """No-op tool."""
+            return "ok"
+
+        resp = _json_action("Thinking...", "noop")
+        agent = self._make_agent([resp], max_steps=3, tools=[noop])
         result = agent.run("Impossible task")
         assert result.stop_reason == StopReason.MAX_STEPS
         assert result.final_answer is None
@@ -707,9 +720,13 @@ class TestAgentPipelineAsync:
         assert result.usage.tools_called == 1
 
     def test_max_steps_async(self) -> None:
+        def noop(x: str = "") -> str:
+            """No-op tool."""
+            return "ok"
+
         resp = _json_action("Looping", "noop")
         kit = AsyncFakeKit([resp])
-        agent = AgentPipeline(kit=kit, max_steps=2)
+        agent = AgentPipeline(kit=kit, max_steps=2, tools=[noop])
         result = self._run(agent.arun("Loop"))
         assert result.stop_reason == StopReason.MAX_STEPS
 

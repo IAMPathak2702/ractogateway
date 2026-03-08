@@ -43,6 +43,7 @@ from ._models import (
     TranscriptSegment,
     VideoConfig,
     VideoInput,
+    VideoProcessingMode,
     VideoProcessorResult,
     VideoProcessorUsage,
     VideoRateLimitExceededError,
@@ -57,6 +58,7 @@ __all__ = [
     # Config & enums
     "DeduplicationMethod",
     "FrameAnalysisMode",
+    "VideoProcessingMode",
     "TranscriberBackend",
     "VideoConfig",
     "VideoInput",

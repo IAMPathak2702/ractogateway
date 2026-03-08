@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import traceback as _tb
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -55,6 +56,7 @@ from ._models import (
     FrameAnalysisMode,
     StageError,
     TranscriberBackend,
+    VideoProcessingMode,
     VideoProcessorResult,
     VideoProcessorUsage,
     VideoRateLimitExceededError,
@@ -173,6 +175,10 @@ class VideoProcessorPipeline:
         transcribe_audio: bool = True,
         analyze_frames: bool = True,
         generate_summary: bool = True,
+        # Processing scope
+        processing_mode: VideoProcessingMode = VideoProcessingMode.ACTIVE,
+        focus_time_seconds: float | None = None,
+        window_seconds: float = 5.0,
         # Integrations
         rag_pipeline: Any = None,
         # Safety & observability
@@ -207,6 +213,9 @@ class VideoProcessorPipeline:
         self._transcribe_audio = transcribe_audio
         self._analyze_frames = analyze_frames
         self._generate_summary = generate_summary
+        self._processing_mode = VideoProcessingMode(processing_mode)
+        self._focus_time_seconds = focus_time_seconds
+        self._window_seconds = window_seconds
 
         self._rag_pipeline = rag_pipeline
         self._safe_mode = safe_mode
@@ -243,6 +252,9 @@ class VideoProcessorPipeline:
         transcribe_audio: Any = _UNSET,
         language: Any = _UNSET,
         generate_summary: Any = _UNSET,
+        processing_mode: Any = _UNSET,
+        focus_time_seconds: Any = _UNSET,
+        window_seconds: Any = _UNSET,
         store_in_rag: bool = False,
         user_id: Any = _UNSET,
     ) -> VideoProcessorResult:
@@ -273,6 +285,9 @@ class VideoProcessorPipeline:
         transcribe_audio: Any = _UNSET,
         language: Any = _UNSET,
         generate_summary: Any = _UNSET,
+        processing_mode: Any = _UNSET,
+        focus_time_seconds: Any = _UNSET,
+        window_seconds: Any = _UNSET,
         store_in_rag: bool = False,
         user_id: Any = _UNSET,
     ) -> VideoProcessorResult:
@@ -310,6 +325,15 @@ class VideoProcessorPipeline:
             "generate_summary": self._resolve(
                 kwargs, "generate_summary", self._generate_summary
             ),
+            "processing_mode": VideoProcessingMode(
+                self._resolve(kwargs, "processing_mode", self._processing_mode)
+            ),
+            "focus_time_seconds": self._resolve(
+                kwargs, "focus_time_seconds", self._focus_time_seconds
+            ),
+            "window_seconds": self._resolve(
+                kwargs, "window_seconds", self._window_seconds
+            ),
             "store_in_rag": kwargs.get("store_in_rag", False),
             "user_id": self._resolve(kwargs, "user_id", self._user_id),
         }
@@ -335,6 +359,110 @@ class VideoProcessorPipeline:
         if isinstance(source, list):
             return f"<{len(source)} pre-extracted frames>"
         return str(source)
+
+    @staticmethod
+    def parse_timestamp(value: float | int | str) -> float:
+        """Parse timestamp values like ``130``, ``"02:10"``, ``"2 mins 10 sec"``."""
+        if isinstance(value, (int, float)):
+            if float(value) < 0:
+                raise ValueError("timestamp must be >= 0.")
+            return float(value)
+
+        text = value.strip().lower()
+        if not text:
+            raise ValueError("timestamp string cannot be empty.")
+
+        # HH:MM:SS or MM:SS
+        if ":" in text:
+            parts = text.split(":")
+            if len(parts) == 2:
+                minutes, seconds = parts
+                return float(minutes) * 60.0 + float(seconds)
+            if len(parts) == 3:
+                hours, minutes, seconds = parts
+                return float(hours) * 3600.0 + float(minutes) * 60.0 + float(seconds)
+            raise ValueError(f"Unsupported timestamp format: {value!r}")
+
+        # Human-readable units: "2 mins 10 sec", "1h 3m", "90s"
+        total = 0.0
+        for num, unit in re.findall(
+            r"(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes|s|sec|secs|second|seconds)",
+            text,
+        ):
+            val = float(num)
+            if unit.startswith("h"):
+                total += val * 3600.0
+            elif unit.startswith("m"):
+                total += val * 60.0
+            else:
+                total += val
+        if total > 0:
+            return total
+
+        # Plain numeric string -> seconds
+        return float(text)
+
+    def _resolve_window(self, cfg: dict[str, Any]) -> tuple[float | None, float | None]:
+        mode = cfg["processing_mode"]
+        if mode == VideoProcessingMode.ACTIVE:
+            return None, None
+
+        focus = cfg["focus_time_seconds"]
+        if focus is None:
+            raise ValueError(
+                "focus_time_seconds is required when processing_mode='passive'."
+            )
+        focus_s = self.parse_timestamp(focus)
+        if focus_s < 0:
+            raise ValueError("focus_time_seconds must be >= 0.")
+
+        window = float(cfg["window_seconds"])
+        if window <= 0:
+            raise ValueError("window_seconds must be > 0.")
+
+        start = max(0.0, focus_s - window)
+        end = focus_s + window
+        return start, end
+
+    @staticmethod
+    def _shift_result_timestamps(
+        result: VideoProcessorResult,
+        *,
+        offset_seconds: float,
+    ) -> VideoProcessorResult:
+        """Shift frame/transcript/section timestamps by an absolute offset."""
+        if offset_seconds == 0:
+            return result
+
+        frames = [
+            f.model_copy(update={"timestamp": f.timestamp + offset_seconds})
+            for f in result.frames
+        ]
+        transcript = [
+            seg.model_copy(
+                update={
+                    "start": seg.start + offset_seconds,
+                    "end": seg.end + offset_seconds,
+                }
+            )
+            for seg in result.transcript
+        ]
+        sections = [
+            sec.model_copy(
+                update={
+                    "timestamp_start": sec.timestamp_start + offset_seconds,
+                    "timestamp_end": sec.timestamp_end + offset_seconds,
+                }
+            )
+            for sec in result.sections
+        ]
+        return result.model_copy(
+            update={
+                "frames": frames,
+                "transcript": transcript,
+                "sections": sections,
+            }
+        )
 
     # ── Sync pipeline execution ──────────────────────────────────────────────
 
@@ -364,6 +492,7 @@ class VideoProcessorPipeline:
         from ._extractor import (  # noqa: PLC0415
             deduplicate_frames,
             extract_frames,
+            extract_frames_window,
             load_frames_from_paths,
         )
         from ._loader import resolve_video_source  # noqa: PLC0415
@@ -375,6 +504,17 @@ class VideoProcessorPipeline:
         label = self._source_label(source)
         usage = VideoProcessorUsage()
         stage_errors: list[StageError] = []
+        processing_mode: VideoProcessingMode = cfg["processing_mode"]
+        window_start_seconds: float | None = None
+        window_end_seconds: float | None = None
+
+        try:
+            window_start_seconds, window_end_seconds = self._resolve_window(cfg)
+        except Exception as exc:
+            err = _make_stage_error("config", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise
 
         try:
             self._check_rate_limit(cfg["user_id"])
@@ -393,11 +533,33 @@ class VideoProcessorPipeline:
                 return self._fatal_stage_result(label, usage, stage_errors, err)
             raise
 
+        if (
+            processing_mode == VideoProcessingMode.PASSIVE
+            and frame_paths is not None
+        ):
+            exc = ValueError(
+                "processing_mode='passive' does not support pre-extracted frame lists. "
+                "Provide a video file/URL/bytes source."
+            )
+            err = _make_stage_error("load", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise exc
+
         # ── 2. Extract frames ── FATAL: no frames = pipeline is meaningless ──
         try:
             if frame_paths is not None:
                 raw_frames = load_frames_from_paths(
                     frame_paths, frame_format=self._frame_format
+                )
+            elif window_start_seconds is not None:
+                raw_frames = extract_frames_window(
+                    video_path,  # type: ignore[arg-type]
+                    fps=cfg["fps"],
+                    max_frames=cfg["max_frames"],
+                    frame_format=self._frame_format,
+                    start_time_seconds=window_start_seconds,
+                    end_time_seconds=window_end_seconds,
                 )
             else:
                 raw_frames = extract_frames(
@@ -443,6 +605,9 @@ class VideoProcessorPipeline:
                         video_path,
                         cfg["language"],
                         usage,
+                        window_start_seconds,
+                        window_end_seconds,
+                        window_start_seconds or 0.0,
                     )
                     transcript = fut.result()
                 transcript = align_frames_to_transcript(frames, transcript)
@@ -512,6 +677,9 @@ class VideoProcessorPipeline:
             usage=usage,
             stage_errors=stage_errors,
             error=top_error,
+            processing_mode=processing_mode,
+            window_start_seconds=window_start_seconds,
+            window_end_seconds=window_end_seconds,
         )
 
         # ── 9. RAG storage ── NON-FATAL: indexing failure must not lose result
@@ -542,16 +710,286 @@ class VideoProcessorPipeline:
         video_path: Path,
         language: str | None,
         usage: VideoProcessorUsage,
+        start_time_seconds: float | None = None,
+        end_time_seconds: float | None = None,
+        time_offset_seconds: float = 0.0,
     ) -> list:
         """Run audio extraction + transcription in a thread."""
         from ._transcriber import extract_audio, get_audio_duration  # noqa: PLC0415
 
-        audio_path = extract_audio(video_path)
+        audio_path = extract_audio(
+            video_path,
+            start_time_seconds=start_time_seconds,
+            end_time_seconds=end_time_seconds,
+        )
         with contextlib.suppress(Exception):
             usage.audio_duration_seconds = get_audio_duration(audio_path)
-        return self._transcriber_obj.transcribe(audio_path, language)
+        segments = self._transcriber_obj.transcribe(audio_path, language)
+        if time_offset_seconds:
+            segments = [
+                seg.model_copy(
+                    update={
+                        "start": seg.start + time_offset_seconds,
+                        "end": seg.end + time_offset_seconds,
+                    }
+                )
+                for seg in segments
+            ]
+        return segments
 
     # ── Async pipeline execution ─────────────────────────────────────────────
+
+    @staticmethod
+    def _build_qa_context(
+        result: VideoProcessorResult,
+        *,
+        max_context_chars: int,
+    ) -> str:
+        lines: list[str] = []
+        if result.sections:
+            for sec in result.sections:
+                lines.append(
+                    f"[{sec.timestamp_start:.1f}s - {sec.timestamp_end:.1f}s]"
+                )
+                if sec.visual_content:
+                    lines.append(f"VISUAL: {sec.visual_content}")
+                if sec.audio_content:
+                    lines.append(f"AUDIO: {sec.audio_content}")
+                lines.append("")
+        elif result.transcript:
+            for seg in result.transcript:
+                lines.append(f"[{seg.start:.1f}s - {seg.end:.1f}s] {seg.text}")
+        else:
+            for frame in result.frames:
+                if frame.kept and frame.analysis:
+                    lines.append(f"[{frame.timestamp:.1f}s] {frame.analysis}")
+
+        context = "\n".join(lines).strip()
+        if len(context) > max_context_chars:
+            context = context[:max_context_chars] + "\n\n[context truncated]"
+        return context
+
+    def _qa_answer_sync(
+        self,
+        *,
+        question: str,
+        context: str,
+    ) -> tuple[str, dict[str, int]]:
+        from ractogateway._models.chat import ChatConfig  # noqa: PLC0415
+        from ractogateway.prompts.engine import RactoPrompt  # noqa: PLC0415
+
+        prompt = RactoPrompt(
+            role="video question-answering specialist",
+            aim=(
+                "Answer the user question using only the provided video timeline context. "
+                "Always anchor claims to timestamp evidence."
+            ),
+            constraints=[
+                "Do not fabricate details not present in context.",
+                "Cite timestamp evidence when available.",
+                "If context is insufficient, explicitly say so.",
+            ],
+            tone="Professional and precise.",
+            output_format="Markdown with sections: Answer, Evidence, Confidence",
+            context=context,
+        )
+
+        try:
+            resp = self._summary_kit.chat(
+                ChatConfig(
+                    user_message=question,
+                    prompt=prompt,
+                    temperature=0.0,
+                    max_tokens=900,
+                )
+            )
+        except TypeError:
+            resp = self._summary_kit.chat(prompt=prompt)
+
+        return (resp.content or "").strip(), (resp.usage or {})
+
+    async def _qa_answer_async(
+        self,
+        *,
+        question: str,
+        context: str,
+    ) -> tuple[str, dict[str, int]]:
+        from ractogateway._models.chat import ChatConfig  # noqa: PLC0415
+        from ractogateway.prompts.engine import RactoPrompt  # noqa: PLC0415
+
+        prompt = RactoPrompt(
+            role="video question-answering specialist",
+            aim=(
+                "Answer the user question using only the provided video timeline context. "
+                "Always anchor claims to timestamp evidence."
+            ),
+            constraints=[
+                "Do not fabricate details not present in context.",
+                "Cite timestamp evidence when available.",
+                "If context is insufficient, explicitly say so.",
+            ],
+            tone="Professional and precise.",
+            output_format="Markdown with sections: Answer, Evidence, Confidence",
+            context=context,
+        )
+
+        try:
+            resp = await self._summary_kit.achat(
+                ChatConfig(
+                    user_message=question,
+                    prompt=prompt,
+                    temperature=0.0,
+                    max_tokens=900,
+                )
+            )
+        except TypeError:
+            resp = await self._summary_kit.achat(prompt=prompt)
+
+        return (resp.content or "").strip(), (resp.usage or {})
+
+    def answer_question(
+        self,
+        source: str | Path | bytes | list,
+        *,
+        question: str,
+        processing_mode: VideoProcessingMode | str = VideoProcessingMode.ACTIVE,
+        focus_time: float | int | str | None = None,
+        window_seconds: float = 5.0,
+        max_context_chars: int = 40_000,
+        **run_kwargs: Any,
+    ) -> VideoProcessorResult:
+        """Process video then answer a user question from extracted timeline context."""
+        if not question.strip():
+            raise ValueError("question cannot be empty.")
+
+        mode = VideoProcessingMode(processing_mode)
+        run_kwargs.setdefault("analyze_frames", True)
+        run_kwargs.setdefault("transcribe_audio", True)
+        run_kwargs.setdefault("generate_summary", False)
+        run_kwargs["processing_mode"] = mode
+        run_kwargs["window_seconds"] = window_seconds
+        if focus_time is not None:
+            run_kwargs["focus_time_seconds"] = self.parse_timestamp(focus_time)
+
+        result = self.run(source, **run_kwargs)
+        if result.failed_stage is not None:
+            return result.model_copy(update={"question": question})
+
+        context = self._build_qa_context(result, max_context_chars=max_context_chars)
+        if not context:
+            return result.model_copy(
+                update={
+                    "question": question,
+                    "answer": "No analyzable context was extracted from this video run.",
+                }
+            )
+
+        try:
+            answer, usage = self._qa_answer_sync(question=question, context=context)
+            updated_usage = result.usage.model_copy(
+                update={
+                    "summary_input_tokens": (
+                        result.usage.summary_input_tokens
+                        + int(usage.get("prompt_tokens", 0))
+                    ),
+                    "summary_output_tokens": (
+                        result.usage.summary_output_tokens
+                        + int(usage.get("completion_tokens", 0))
+                    ),
+                }
+            )
+            return result.model_copy(
+                update={
+                    "question": question,
+                    "answer": answer,
+                    "usage": updated_usage,
+                }
+            )
+        except Exception as exc:
+            err = _make_stage_error("answer", exc)
+            if self._safe_mode:
+                return result.model_copy(
+                    update={
+                        "question": question,
+                        "stage_errors": [*result.stage_errors, err],
+                        "error": result.error or str(err),
+                    }
+                )
+            raise RuntimeError(
+                f"[Stage: answer] {err.error_type}: {err.message}"
+            ) from exc
+
+    async def aanswer_question(
+        self,
+        source: str | Path | bytes | list,
+        *,
+        question: str,
+        processing_mode: VideoProcessingMode | str = VideoProcessingMode.ACTIVE,
+        focus_time: float | int | str | None = None,
+        window_seconds: float = 5.0,
+        max_context_chars: int = 40_000,
+        **run_kwargs: Any,
+    ) -> VideoProcessorResult:
+        """Async variant of :meth:`answer_question`."""
+        if not question.strip():
+            raise ValueError("question cannot be empty.")
+
+        mode = VideoProcessingMode(processing_mode)
+        run_kwargs.setdefault("analyze_frames", True)
+        run_kwargs.setdefault("transcribe_audio", True)
+        run_kwargs.setdefault("generate_summary", False)
+        run_kwargs["processing_mode"] = mode
+        run_kwargs["window_seconds"] = window_seconds
+        if focus_time is not None:
+            run_kwargs["focus_time_seconds"] = self.parse_timestamp(focus_time)
+
+        result = await self.arun(source, **run_kwargs)
+        if result.failed_stage is not None:
+            return result.model_copy(update={"question": question})
+
+        context = self._build_qa_context(result, max_context_chars=max_context_chars)
+        if not context:
+            return result.model_copy(
+                update={
+                    "question": question,
+                    "answer": "No analyzable context was extracted from this video run.",
+                }
+            )
+
+        try:
+            answer, usage = await self._qa_answer_async(question=question, context=context)
+            updated_usage = result.usage.model_copy(
+                update={
+                    "summary_input_tokens": (
+                        result.usage.summary_input_tokens
+                        + int(usage.get("prompt_tokens", 0))
+                    ),
+                    "summary_output_tokens": (
+                        result.usage.summary_output_tokens
+                        + int(usage.get("completion_tokens", 0))
+                    ),
+                }
+            )
+            return result.model_copy(
+                update={
+                    "question": question,
+                    "answer": answer,
+                    "usage": updated_usage,
+                }
+            )
+        except Exception as exc:
+            err = _make_stage_error("answer", exc)
+            if self._safe_mode:
+                return result.model_copy(
+                    update={
+                        "question": question,
+                        "stage_errors": [*result.stage_errors, err],
+                        "error": result.error or str(err),
+                    }
+                )
+            raise RuntimeError(
+                f"[Stage: answer] {err.error_type}: {err.message}"
+            ) from exc
 
     async def _arun_pipeline(
         self,
@@ -560,8 +998,9 @@ class VideoProcessorPipeline:
     ) -> VideoProcessorResult:
         from ._analyzer import analyze_frames_async  # noqa: PLC0415
         from ._extractor import (  # noqa: PLC0415
-            deduplicate_frames,
+            deduplicate_frames_fast,
             extract_frames,
+            extract_frames_window,
             load_frames_from_paths,
         )
         from ._loader import resolve_video_source  # noqa: PLC0415
@@ -573,7 +1012,19 @@ class VideoProcessorPipeline:
         label = self._source_label(source)
         usage = VideoProcessorUsage()
         stage_errors: list[StageError] = []
-        loop = asyncio.get_event_loop()
+        # Python 3.10+: get_running_loop() is safe inside a coroutine; no deprecation.
+        loop = asyncio.get_running_loop()
+        processing_mode: VideoProcessingMode = cfg["processing_mode"]
+        window_start_seconds: float | None = None
+        window_end_seconds: float | None = None
+
+        try:
+            window_start_seconds, window_end_seconds = self._resolve_window(cfg)
+        except Exception as exc:
+            err = _make_stage_error("config", exc)
+            if self._safe_mode:
+                return self._fatal_stage_result(label, usage, stage_errors, err)
+            raise
 
         try:
             self._check_rate_limit(cfg["user_id"])
@@ -583,10 +1034,10 @@ class VideoProcessorPipeline:
                 return self._fatal_stage_result(label, usage, stage_errors, err)
             raise
 
-        # ── 1. Resolve source — in thread ── FATAL ───────────────────────────
+        # ── 1. Resolve source — non-blocking via to_thread ── FATAL ──────────
         try:
-            video_path, frame_paths = await loop.run_in_executor(
-                None, resolve_video_source, source
+            video_path, frame_paths = await asyncio.to_thread(
+                resolve_video_source, source
             )
         except Exception as exc:
             err = _make_stage_error("load", exc)
@@ -594,11 +1045,25 @@ class VideoProcessorPipeline:
                 return self._fatal_stage_result(label, usage, stage_errors, err)
             raise
 
-        # ── 2. Extract frames — CPU-bound, run in thread pool ── FATAL ────────
+        # ── 2. Extract frames — CPU-bound in thread pool ── FATAL ─────────────
         def _extract() -> list:
             if frame_paths is not None:
+                if processing_mode == VideoProcessingMode.PASSIVE:
+                    raise ValueError(
+                        "processing_mode='passive' does not support pre-extracted frame lists. "
+                        "Provide a video file/URL/bytes source."
+                    )
                 return load_frames_from_paths(
                     frame_paths, frame_format=self._frame_format
+                )
+            if window_start_seconds is not None:
+                return extract_frames_window(
+                    video_path,  # type: ignore[arg-type]
+                    fps=cfg["fps"],
+                    max_frames=cfg["max_frames"],
+                    frame_format=self._frame_format,
+                    start_time_seconds=window_start_seconds,
+                    end_time_seconds=window_end_seconds,
                 )
             return extract_frames(
                 video_path,  # type: ignore[arg-type]
@@ -619,15 +1084,17 @@ class VideoProcessorPipeline:
 
         usage.frames_extracted = len(raw_frames)
 
-        # ── 3. Deduplicate ── FATAL ───────────────────────────────────────────
+        # ── 3. Deduplicate — parallel pHash pre-computation ── FATAL ──────────
+        # deduplicate_frames_fast computes all hashes in parallel via
+        # ThreadPoolExecutor then does O(1) XOR+popcount comparisons.
+        # Falls back to sequential SSIM path when method=SSIM.
         try:
-            frames = await loop.run_in_executor(
-                None,
-                lambda: deduplicate_frames(
-                    raw_frames,
-                    similarity_threshold=cfg["similarity_threshold"],
-                    method=cfg["dedup_method"],
-                ),
+            frames = await asyncio.to_thread(
+                deduplicate_frames_fast,
+                raw_frames,
+                similarity_threshold=cfg["similarity_threshold"],
+                method=cfg["dedup_method"],
+                max_hash_workers=self._max_process_workers,
             )
         except Exception as exc:
             err = _make_stage_error("deduplicate", exc)
@@ -640,45 +1107,67 @@ class VideoProcessorPipeline:
         usage.frames_kept = sum(1 for f in frames if f.kept)
         usage.frames_discarded = sum(1 for f in frames if not f.kept)
 
-        # ── 4. Transcription — NON-FATAL ─────────────────────────────────────
-        transcript: list = []
-        if cfg["transcribe_audio"] and video_path is not None:
-            try:
-                transcript = await loop.run_in_executor(
-                    None,
-                    self._run_transcription,
-                    video_path,
-                    cfg["language"],
-                    usage,
-                )
-                transcript = align_frames_to_transcript(frames, transcript)
-            except Exception as exc:
-                err = _make_stage_error("transcribe", exc)
-                stage_errors.append(err)
-                if not self._safe_mode:
-                    raise RuntimeError(
-                        f"[Stage: transcribe] {err.error_type}: {err.message}"
-                    ) from exc
+        # ── 4+5. Transcription || Frame analysis — RUN CONCURRENTLY ───────────
+        # Transcription (blocking I/O in a thread) and LLM analysis (async
+        # network I/O via Semaphore-gated asyncio.gather) are independent after
+        # deduplication completes.  Running them in parallel halves wall-clock
+        # time for typical lecture videos where each takes 1-10+ minutes.
 
-        # ── 5. Frame analysis — NON-FATAL ─────────────────────────────────────
-        if cfg["analyze_frames"]:
-            try:
-                frames = await analyze_frames_async(
-                    frames,
-                    self._analysis_kit,
-                    mode=cfg["frame_analysis_mode"],
-                    batch_size=cfg["batch_size"],
-                    max_workers=self._max_workers,
-                    grid_size=cfg["grid_size"],
-                    usage=usage,
-                )
-            except Exception as exc:
-                err = _make_stage_error("analyze", exc)
-                stage_errors.append(err)
-                if not self._safe_mode:
-                    raise RuntimeError(
-                        f"[Stage: analyze] {err.error_type}: {err.message}"
-                    ) from exc
+        async def _transcribe_stage() -> list:
+            if not cfg["transcribe_audio"] or video_path is None:
+                return []
+            return await asyncio.to_thread(
+                self._run_transcription,
+                video_path,
+                cfg["language"],
+                usage,
+                window_start_seconds,
+                window_end_seconds,
+                window_start_seconds or 0.0,
+            )
+
+        async def _analyze_stage(current_frames: list) -> list:
+            if not cfg["analyze_frames"]:
+                return current_frames
+            return await analyze_frames_async(
+                current_frames,
+                self._analysis_kit,
+                mode=cfg["frame_analysis_mode"],
+                batch_size=cfg["batch_size"],
+                max_workers=self._max_workers,
+                grid_size=cfg["grid_size"],
+                usage=usage,
+            )
+
+        transcript_result, frames_result = await asyncio.gather(
+            _transcribe_stage(),
+            _analyze_stage(frames),
+            return_exceptions=True,
+        )
+
+        # Handle transcription result (NON-FATAL)
+        transcript: list = []
+        if isinstance(transcript_result, BaseException):
+            err = _make_stage_error("transcribe", transcript_result)
+            stage_errors.append(err)
+            if not self._safe_mode:
+                raise RuntimeError(
+                    f"[Stage: transcribe] {err.error_type}: {err.message}"
+                ) from transcript_result
+        else:
+            transcript = transcript_result
+            transcript = align_frames_to_transcript(frames, transcript)
+
+        # Handle analysis result (NON-FATAL)
+        if isinstance(frames_result, BaseException):
+            err = _make_stage_error("analyze", frames_result)
+            stage_errors.append(err)
+            if not self._safe_mode:
+                raise RuntimeError(
+                    f"[Stage: analyze] {err.error_type}: {err.message}"
+                ) from frames_result
+        else:
+            frames = frames_result
 
         # ── 6. Build sections — NON-FATAL ─────────────────────────────────────
         sections: list = []
@@ -718,6 +1207,9 @@ class VideoProcessorPipeline:
             usage=usage,
             stage_errors=stage_errors,
             error=top_error,
+            processing_mode=processing_mode,
+            window_start_seconds=window_start_seconds,
+            window_end_seconds=window_end_seconds,
         )
 
         # ── 9. RAG storage — NON-FATAL ────────────────────────────────────────
@@ -768,3 +1260,30 @@ class AsyncVideoProcessorPipeline:
     ) -> VideoProcessorResult:
         """Async-only process entrypoint."""
         return await self._inner.arun(source, **kwargs)
+
+    async def answer_question(
+        self,
+        source: str | Path | bytes | list,
+        *,
+        question: str,
+        processing_mode: VideoProcessingMode | str = VideoProcessingMode.ACTIVE,
+        focus_time: float | int | str | None = None,
+        window_seconds: float = 5.0,
+        max_context_chars: int = 40_000,
+        **run_kwargs: Any,
+    ) -> VideoProcessorResult:
+        """Async-only variant of :meth:`VideoProcessorPipeline.aanswer_question`."""
+        return await self._inner.aanswer_question(
+            source,
+            question=question,
+            processing_mode=processing_mode,
+            focus_time=focus_time,
+            window_seconds=window_seconds,
+            max_context_chars=max_context_chars,
+            **run_kwargs,
+        )
+
+    @staticmethod
+    def parse_timestamp(value: float | int | str) -> float:
+        """Delegate to :meth:`VideoProcessorPipeline.parse_timestamp`."""
+        return VideoProcessorPipeline.parse_timestamp(value)

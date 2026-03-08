@@ -148,17 +148,31 @@ def _require_ollama():  # type: ignore[return]
 # ---------------------------------------------------------------------------
 
 
-def extract_audio(video_path: Path) -> Path:
-    """Extract audio from *video_path* to a WAV temp file via ffmpeg-python."""
+def extract_audio(
+    video_path: Path,
+    *,
+    start_time_seconds: float | None = None,
+    end_time_seconds: float | None = None,
+) -> Path:
+    """Extract audio from *video_path* to a WAV temp file via ffmpeg-python.
+
+    When start/end bounds are provided, only that time window is extracted.
+    """
     ffmpeg = _require_ffmpeg()
 
     fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="ractoaudio_")
     os.close(fd)
     audio_path = Path(tmp_path)
 
+    input_kwargs: dict[str, float] = {}
+    if start_time_seconds is not None and start_time_seconds > 0:
+        input_kwargs["ss"] = float(start_time_seconds)
+    if end_time_seconds is not None:
+        input_kwargs["to"] = float(end_time_seconds)
+
     (
         ffmpeg
-        .input(str(video_path))
+        .input(str(video_path), **input_kwargs)
         .output(
             str(audio_path),
             format="wav",

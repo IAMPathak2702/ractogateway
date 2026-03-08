@@ -413,6 +413,104 @@ async def process_video(file: UploadFile):
 
 ---
 
+## Passive Mode — Focused Time Windows
+
+Instead of processing the entire video, **passive mode** extracts and analyses only
+a narrow time window around a specific timestamp. This is ideal for targeted Q&A
+on long recordings.
+
+```python
+from ractogateway.pipelines.video_processor import VideoProcessingMode
+
+# Process only the 10-second window around the 2:10 mark (125s–135s)
+result = pipeline.run(
+    "lecture.mp4",
+    processing_mode=VideoProcessingMode.PASSIVE,
+    focus_time_seconds=130.0,   # center of window
+    window_seconds=5.0,         # ±5 s → [125 s, 135 s]
+)
+
+print(result.window_start_seconds)  # 125.0
+print(result.window_end_seconds)    # 135.0
+```
+
+Timestamps in the result are **absolute** (relative to the original video source),
+not relative to the window start — so `frame.timestamp=127.3` means 2:07 in the
+full video.
+
+### Timestamp formats
+
+`focus_time_seconds` (and `answer_question`'s `focus_time`) accept any of:
+
+```python
+pipeline.run("v.mp4", processing_mode="passive", focus_time_seconds=130)
+pipeline.run("v.mp4", processing_mode="passive", focus_time_seconds="02:10")
+pipeline.run("v.mp4", processing_mode="passive", focus_time_seconds="2 mins 10 sec")
+pipeline.run("v.mp4", processing_mode="passive", focus_time_seconds="1h 2m 10s")
+```
+
+You can also call the parser directly:
+
+```python
+VideoProcessorPipeline.parse_timestamp("02:10")      # → 130.0
+VideoProcessorPipeline.parse_timestamp("2 mins 10s") # → 130.0
+```
+
+---
+
+## Q&A — Answering Questions from Video Content
+
+`answer_question` combines passive-mode windowed processing with a focused LLM
+question-answering call. It returns the normal `VideoProcessorResult` with
+`result.question` and `result.answer` populated.
+
+```python
+result = pipeline.answer_question(
+    "lecture.mp4",
+    question="Which equation appears near the 2-minute mark?",
+    processing_mode="passive",
+    focus_time="02:00",
+    window_seconds=10.0,
+)
+
+print(result.answer)
+# ## Answer
+# At [115.0s - 125.0s] the whiteboard shows **F = ma** (Newton's Second Law).
+#
+# ## Evidence
+# Frame at 117.3 s: "Board: F = ma"
+#
+# ## Confidence
+# High — equation clearly visible in 3 consecutive frames.
+```
+
+### Active mode Q&A
+
+For shorter videos or when you want the LLM to draw from the entire timeline:
+
+```python
+result = pipeline.answer_question(
+    "short_demo.mp4",
+    question="What Python library does the presenter use for plotting?",
+    processing_mode="active",  # scan the whole video
+)
+print(result.answer)
+```
+
+### Async variant
+
+```python
+result = await pipeline.aanswer_question(
+    "lecture.mp4",
+    question="What is the definition of entropy given at 5:30?",
+    processing_mode="passive",
+    focus_time="5:30",
+    window_seconds=8.0,
+)
+```
+
+---
+
 ## Per-Call Overrides
 
 Any constructor parameter can be overridden per call:

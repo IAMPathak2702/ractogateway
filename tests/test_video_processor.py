@@ -29,6 +29,7 @@ from ractogateway.pipelines.video_processor import (
     TranscriberBackend,
     TranscriptSegment,
     VideoConfig,
+    VideoProcessingMode,
     VideoProcessorPipeline,
     VideoProcessorResult,
     VideoProcessorUsage,
@@ -84,6 +85,21 @@ def _make_kit_mock(response_text: str = "Whiteboard: E=mc²") -> MagicMock:
     kit = MagicMock()
     kit.chat.return_value = _make_llm_response(response_text)
     return kit
+
+
+class _StrictChatConfigKit:
+    """Kit mock that only accepts chat(config)/achat(config) style calls."""
+
+    def __init__(self, response_text: str = "OK") -> None:
+        self._text = response_text
+
+    def chat(self, config: Any) -> Any:
+        assert hasattr(config, "user_message")
+        return _make_llm_response(self._text)
+
+    async def achat(self, config: Any) -> Any:
+        assert hasattr(config, "user_message")
+        return _make_llm_response(self._text)
 
 
 def _make_pipeline(kit: Any = None, **kwargs: Any) -> VideoProcessorPipeline:
@@ -185,6 +201,20 @@ class TestVideoConfig:
     def test_ssim_method(self) -> None:
         cfg = VideoConfig(dedup_method="ssim")
         assert cfg.dedup_method == DeduplicationMethod.SSIM
+
+
+class TestTimestampParsing:
+    """Timestamp parser for passive processing windows."""
+
+    def test_mm_ss(self) -> None:
+        assert VideoProcessorPipeline.parse_timestamp("02:10") == 130.0
+
+    def test_human_units(self) -> None:
+        assert VideoProcessorPipeline.parse_timestamp("2 mins 10 sec") == 130.0
+
+    def test_negative_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            VideoProcessorPipeline.parse_timestamp(-1)
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +659,73 @@ class TestVideoProcessorPipelineIntegration:
         with pytest.raises(FileNotFoundError):
             pipeline.run("/nonexistent/video.mp4")
 
+    def test_passive_mode_requires_focus_time(self) -> None:
+        pipeline = _make_pipeline(safe_mode=False)
+        with pytest.raises(ValueError, match="focus_time_seconds"):
+            pipeline.run("any.mp4", processing_mode="passive")
+
+    def test_passive_mode_uses_window_extractor(
+        self, tmp_path: Path
+    ) -> None:
+        f = tmp_path / "v.mp4"
+        f.write_bytes(b"x")
+
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor.extract_frames_window",
+            return_value=_make_raw_frames(2),
+        ) as mock_window, patch(
+            "ractogateway.pipelines.video_processor._extractor.extract_frames",
+            return_value=_make_raw_frames(99),
+        ) as mock_full, patch(
+            "ractogateway.pipelines.video_processor._extractor._phash_similarity",
+            return_value=0.0,
+        ):
+            pipeline = _make_pipeline(
+                safe_mode=True,
+                transcribe_audio=False,
+                analyze_frames=False,
+                generate_summary=False,
+            )
+            result = pipeline.run(
+                str(f),
+                processing_mode="passive",
+                focus_time_seconds=130.0,
+                window_seconds=5.0,
+            )
+
+        mock_window.assert_called_once()
+        mock_full.assert_not_called()
+        assert result.processing_mode == VideoProcessingMode.PASSIVE
+        assert result.window_start_seconds == 125.0
+        assert result.window_end_seconds == 135.0
+
+    def test_run_transcription_applies_window_offset(self) -> None:
+        pipeline = _make_pipeline()
+        pipeline._transcriber_obj = MagicMock()
+        pipeline._transcriber_obj.transcribe.return_value = [
+            TranscriptSegment(start=0.0, end=2.0, text="hello")
+        ]
+        usage = VideoProcessorUsage()
+
+        with patch(
+            "ractogateway.pipelines.video_processor._transcriber.extract_audio",
+            return_value=Path("audio.wav"),
+        ), patch(
+            "ractogateway.pipelines.video_processor._transcriber.get_audio_duration",
+            return_value=10.0,
+        ):
+            segs = pipeline._run_transcription(
+                Path("video.mp4"),
+                "en",
+                usage,
+                start_time_seconds=125.0,
+                end_time_seconds=135.0,
+                time_offset_seconds=125.0,
+            )
+
+        assert segs[0].start == 125.0
+        assert segs[0].end == 127.0
+
     def test_run_with_pre_extracted_frames(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -828,6 +925,83 @@ class TestVideoProcessorPipelineIntegration:
         assert result.error is None
         assert result.summary == "Structured summary"
         assert all(err.stage != "summarize" for err in result.stage_errors)
+
+    def test_analysis_supports_chatconfig_signature_only_kit(
+        self, tmp_path: Path
+    ) -> None:
+        f = tmp_path / "v.mp4"
+        f.write_bytes(b"x")
+
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor.extract_frames",
+            return_value=_make_raw_frames(1),
+        ), patch(
+            "ractogateway.pipelines.video_processor._extractor._phash_similarity",
+            return_value=0.0,
+        ):
+            pipeline = _make_pipeline(
+                kit=_StrictChatConfigKit("analyzed"),
+                safe_mode=False,
+                transcribe_audio=False,
+                analyze_frames=True,
+                generate_summary=False,
+            )
+            result = pipeline.run(str(f))
+
+        assert result.error is None
+        assert all(err.stage != "analyze" for err in result.stage_errors)
+
+    def test_summary_supports_chatconfig_signature_only_kit(
+        self, tmp_path: Path
+    ) -> None:
+        f = tmp_path / "v.mp4"
+        f.write_bytes(b"x")
+
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor.extract_frames",
+            return_value=_make_raw_frames(1),
+        ), patch(
+            "ractogateway.pipelines.video_processor._extractor._phash_similarity",
+            return_value=0.0,
+        ):
+            pipeline = _make_pipeline(
+                kit=_StrictChatConfigKit("strict-summary"),
+                safe_mode=False,
+                transcribe_audio=False,
+                analyze_frames=False,
+                generate_summary=True,
+            )
+            result = pipeline.run(str(f))
+
+        assert result.summary == "strict-summary"
+
+    def test_answer_question_enriches_result(self) -> None:
+        pipeline = _make_pipeline(kit=_make_kit_mock("answer-text"), safe_mode=True)
+        base = VideoProcessorResult(
+            video_path="v.mp4",
+            sections=[
+                VideoSection(
+                    timestamp_start=125.0,
+                    timestamp_end=135.0,
+                    frame_ids=[0],
+                    visual_content="Board shows x^2 + y^2 = z^2",
+                    audio_content="Pythagorean theorem",
+                )
+            ],
+            usage=VideoProcessorUsage(),
+        )
+
+        pipeline.run = MagicMock(return_value=base)  # type: ignore[method-assign]
+        result = pipeline.answer_question(
+            "v.mp4",
+            question="Which equation appears near 2:10?",
+            processing_mode="passive",
+            focus_time="2 mins 10 sec",
+            window_seconds=5.0,
+        )
+
+        assert result.question == "Which equation appears near 2:10?"
+        assert result.answer is not None
 
     def test_summary_generated_from_sections(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1123,3 +1297,306 @@ class TestPublicImports:
             AsyncVideoProcessorPipeline,
             VideoProcessorPipeline,
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests — deduplicate_frames_fast (DSA-optimised pHash path)
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplicateFramesFast:
+    """Unit tests for the parallel pHash fast-path deduplication."""
+
+    def test_empty_returns_empty(self) -> None:
+        from ractogateway.pipelines.video_processor._extractor import (
+            deduplicate_frames_fast,
+        )
+
+        result = deduplicate_frames_fast(
+            [],
+            similarity_threshold=90.0,
+            method=DeduplicationMethod.PHASH,
+        )
+        assert result == []
+
+    def test_ssim_falls_back_to_sequential(self) -> None:
+        """SSIM path should delegate to deduplicate_frames (sequential)."""
+        from ractogateway.pipelines.video_processor._extractor import (
+            deduplicate_frames,
+            deduplicate_frames_fast,
+        )
+
+        raw = _make_raw_frames(3)
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor.deduplicate_frames",
+            wraps=deduplicate_frames,
+        ) as mock_seq, patch(
+            "ractogateway.pipelines.video_processor._extractor._ssim_similarity",
+            return_value=50.0,  # below 90 → all kept
+        ):
+            result = deduplicate_frames_fast(
+                raw,
+                similarity_threshold=90.0,
+                method=DeduplicationMethod.SSIM,
+            )
+
+        # The sequential path must have been called
+        mock_seq.assert_called_once()
+        assert len(result) == 3
+        assert all(hasattr(f, "kept") for f in result)
+
+    def test_phash_fast_path_keeps_first_always(self) -> None:
+        """First frame is always kept regardless of similarity."""
+        from ractogateway.pipelines.video_processor._extractor import (
+            deduplicate_frames_fast,
+        )
+
+        raw = _make_raw_frames(3)
+        # All frames identical → high similarity → only first kept
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor._phash_as_int",
+            return_value=0xDEADBEEF,
+        ):
+            result = deduplicate_frames_fast(
+                raw,
+                similarity_threshold=90.0,
+                method=DeduplicationMethod.PHASH,
+            )
+
+        assert result[0].kept is True
+        assert result[1].kept is False  # identical hash → high sim → discard
+        assert result[2].kept is False
+
+    def test_phash_fast_path_keeps_distinct_frames(self) -> None:
+        """Frames with maximally different hashes (XOR=64 bits) are all kept."""
+        from ractogateway.pipelines.video_processor._extractor import (
+            deduplicate_frames_fast,
+        )
+
+        # Alternating 0 and 0xFFFFFFFFFFFFFFFF → Hamming distance = 64 → 0% sim
+        raw = _make_raw_frames(4)
+        alternating = [0x0, 0xFFFFFFFFFFFFFFFF, 0x0, 0xFFFFFFFFFFFFFFFF]
+        call_count = [0]
+
+        def _fake_phash_as_int(_img_bytes: bytes) -> int:
+            val = alternating[call_count[0] % len(alternating)]
+            call_count[0] += 1
+            return val
+
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor._phash_as_int",
+            side_effect=_fake_phash_as_int,
+        ):
+            result = deduplicate_frames_fast(
+                raw,
+                similarity_threshold=90.0,
+                method=DeduplicationMethod.PHASH,
+            )
+
+        assert all(f.kept for f in result)
+
+    def test_hamming_similarity_identical(self) -> None:
+        from ractogateway.pipelines.video_processor._extractor import (
+            _hamming_similarity,
+        )
+
+        assert _hamming_similarity(0xABCD, 0xABCD) == 100.0
+
+    def test_hamming_similarity_opposite(self) -> None:
+        from ractogateway.pipelines.video_processor._extractor import (
+            _hamming_similarity,
+        )
+
+        # All 64 bits differ → 0% similarity
+        assert _hamming_similarity(0x0, 0xFFFFFFFFFFFFFFFF) == 0.0
+
+    def test_phash_as_int_returns_int(self) -> None:
+        from ractogateway.pipelines.video_processor._extractor import _phash_as_int
+
+        fake_imagehash = MagicMock()
+        fake_hash = MagicMock()
+        fake_hash.__str__ = MagicMock(return_value="0000000000000001")
+        fake_imagehash.phash.return_value = fake_hash
+
+        fake_pil = MagicMock()
+        fake_img = MagicMock()
+        fake_pil.open.return_value.convert.return_value = fake_img
+
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor._require_imagehash",
+            return_value=fake_imagehash,
+        ), patch(
+            "ractogateway.pipelines.video_processor._extractor._require_pil",
+            return_value=fake_pil,
+        ):
+            result = _phash_as_int(_fake_jpeg_bytes())
+
+        assert isinstance(result, int)
+        assert result == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests — AsyncVideoProcessorPipeline.answer_question
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncPipelineAnswerQuestion:
+    """answer_question delegated via AsyncVideoProcessorPipeline."""
+
+    @pytest.mark.asyncio
+    async def test_answer_question_delegates_to_inner(self) -> None:
+        # Use _StrictChatConfigKit so both chat() and achat() work correctly
+        kit = _StrictChatConfigKit("The answer is 42.")
+        pipeline = AsyncVideoProcessorPipeline(
+            kit=kit,
+            safe_mode=True,
+            transcribe_audio=False,
+            analyze_frames=False,
+            generate_summary=False,
+        )
+
+        base_result = VideoProcessorResult(
+            video_path="v.mp4",
+            sections=[
+                VideoSection(
+                    timestamp_start=0.0,
+                    timestamp_end=10.0,
+                    frame_ids=[0],
+                    visual_content="Answer: 42",
+                )
+            ],
+            usage=VideoProcessorUsage(),
+        )
+
+        # Wrap the inner arun to be async and return base_result
+        async def _async_arun(source: object, **kwargs: object) -> VideoProcessorResult:
+            return base_result
+
+        pipeline._inner.arun = _async_arun  # type: ignore[method-assign]
+
+        result = await pipeline.answer_question(
+            "v.mp4",
+            question="What is the answer?",
+        )
+
+        assert result.question == "What is the answer?"
+        assert result.answer is not None
+
+    def test_parse_timestamp_delegates(self) -> None:
+        """AsyncVideoProcessorPipeline.parse_timestamp mirrors inner pipeline."""
+        assert AsyncVideoProcessorPipeline.parse_timestamp("1:30") == 90.0
+        assert AsyncVideoProcessorPipeline.parse_timestamp(45) == 45.0
+
+
+# ---------------------------------------------------------------------------
+# Tests — concurrent transcription + analysis in _arun_pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncPipelineConcurrency:
+    """Verify that _arun_pipeline runs transcription and analysis concurrently."""
+
+    @pytest.mark.asyncio
+    async def test_arun_concurrent_stages_both_succeed(
+        self, tmp_path: Path
+    ) -> None:
+        """Both transcription and analysis complete without errors."""
+        f = tmp_path / "v.mp4"
+        f.write_bytes(b"x")
+
+        analyzed_frames = [
+            FrameEntry(
+                frame_id=0,
+                timestamp=0.0,
+                kept=True,
+                analysis="Board: E=mc²",
+            )
+        ]
+
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor.extract_frames",
+            return_value=_make_raw_frames(1),
+        ), patch(
+            "ractogateway.pipelines.video_processor._extractor._phash_as_int",
+            return_value=0,
+        ), patch(
+            "ractogateway.pipelines.video_processor._analyzer.analyze_frames_async",
+            return_value=analyzed_frames,
+        ) as mock_analyze, patch(
+            "ractogateway.pipelines.video_processor.pipeline.VideoProcessorPipeline._run_transcription",
+            return_value=[],
+        ) as mock_transcribe:
+            pipeline = VideoProcessorPipeline(
+                kit=_make_kit_mock(),
+                safe_mode=True,
+                transcribe_audio=True,
+                analyze_frames=True,
+                generate_summary=False,
+            )
+            result = await pipeline.arun(str(f))
+
+        assert result.error is None
+        mock_analyze.assert_called_once()
+        mock_transcribe.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_arun_analysis_failure_is_nonfatal_in_safe_mode(
+        self, tmp_path: Path
+    ) -> None:
+        """Analysis failure in safe_mode yields stage_error but no exception."""
+        f = tmp_path / "v.mp4"
+        f.write_bytes(b"x")
+
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor.extract_frames",
+            return_value=_make_raw_frames(1),
+        ), patch(
+            "ractogateway.pipelines.video_processor._extractor._phash_as_int",
+            return_value=0,
+        ), patch(
+            "ractogateway.pipelines.video_processor._analyzer.analyze_frames_async",
+            side_effect=RuntimeError("Vision LLM down"),
+        ):
+            pipeline = VideoProcessorPipeline(
+                kit=_make_kit_mock(),
+                safe_mode=True,
+                transcribe_audio=False,
+                analyze_frames=True,
+                generate_summary=False,
+            )
+            result = await pipeline.arun(str(f))
+
+        assert any(e.stage == "analyze" for e in result.stage_errors)
+
+    @pytest.mark.asyncio
+    async def test_arun_uses_deduplicate_frames_fast(
+        self, tmp_path: Path
+    ) -> None:
+        """_arun_pipeline calls deduplicate_frames_fast not deduplicate_frames."""
+        f = tmp_path / "v.mp4"
+        f.write_bytes(b"x")
+
+        with patch(
+            "ractogateway.pipelines.video_processor._extractor.extract_frames",
+            return_value=_make_raw_frames(2),
+        ), patch(
+            "ractogateway.pipelines.video_processor._extractor.deduplicate_frames_fast",
+            return_value=[
+                FrameEntry(frame_id=0, timestamp=0.0, kept=True),
+                FrameEntry(frame_id=1, timestamp=1.0, kept=True),
+            ],
+        ) as mock_fast, patch(
+            "ractogateway.pipelines.video_processor._extractor.deduplicate_frames",
+        ) as mock_slow:
+            pipeline = VideoProcessorPipeline(
+                kit=_make_kit_mock(),
+                safe_mode=True,
+                transcribe_audio=False,
+                analyze_frames=False,
+                generate_summary=False,
+            )
+            result = await pipeline.arun(str(f))
+
+        mock_fast.assert_called_once()
+        mock_slow.assert_not_called()
+        assert result.usage.frames_kept == 2

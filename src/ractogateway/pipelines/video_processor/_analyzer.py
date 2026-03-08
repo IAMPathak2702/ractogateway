@@ -72,7 +72,13 @@ Be precise. Do not hallucinate content not visible in the image."""
 # ---------------------------------------------------------------------------
 
 
-def _build_attachment_config(kit: Any, attachments: list) -> Any:  # noqa: ANN401
+def _build_attachment_config(
+    kit: Any,
+    attachments: list,
+    *,
+    user_message: str,
+    prompt: Any,
+) -> Any:  # noqa: ANN401
     """Return a ``ChatConfig(attachments=...)`` instance for *kit*'s provider.
 
     Resolves the correct ``ChatConfig`` class from the kit's own package by
@@ -89,10 +95,88 @@ def _build_attachment_config(kit: Any, attachments: list) -> Any:  # noqa: ANN40
             mod = importlib.import_module(pkg)
             config_cls = getattr(mod, "ChatConfig", None)
             if config_cls is not None:
-                return config_cls(attachments=attachments)
+                # Prefer modern shape first, then legacy attachments-only shape.
+                for payload in (
+                    {
+                        "user_message": user_message,
+                        "prompt": prompt,
+                        "attachments": attachments,
+                    },
+                    {"attachments": attachments},
+                ):
+                    try:
+                        return config_cls(**payload)
+                    except Exception:  # noqa: BLE001
+                        continue
         except ImportError:  # noqa: S110
             continue
     return None
+
+
+def _chat_with_prompt_sync(
+    kit: Any,
+    *,
+    prompt: Any,
+    user_message: str,
+    attachments: list | None = None,
+) -> Any:  # noqa: ANN401
+    """Call ``kit.chat`` with modern ChatConfig, with legacy fallback."""
+    from ractogateway._models.chat import ChatConfig  # noqa: PLC0415
+
+    att = attachments or []
+    try:
+        cfg = ChatConfig(
+            user_message=user_message,
+            prompt=prompt,
+            attachments=att or None,
+        )
+        return kit.chat(cfg)
+    except TypeError:
+        legacy_cfg = _build_attachment_config(
+            kit,
+            att,
+            user_message=user_message,
+            prompt=prompt,
+        )
+        if legacy_cfg is not None:
+            try:
+                return kit.chat(prompt=prompt, config=legacy_cfg)
+            except TypeError:
+                pass
+        return kit.chat(prompt=prompt)
+
+
+async def _chat_with_prompt_async(
+    kit: Any,
+    *,
+    prompt: Any,
+    user_message: str,
+    attachments: list | None = None,
+) -> Any:  # noqa: ANN401
+    """Call ``kit.achat`` with modern ChatConfig, with legacy fallback."""
+    from ractogateway._models.chat import ChatConfig  # noqa: PLC0415
+
+    att = attachments or []
+    try:
+        cfg = ChatConfig(
+            user_message=user_message,
+            prompt=prompt,
+            attachments=att or None,
+        )
+        return await kit.achat(cfg)
+    except TypeError:
+        legacy_cfg = _build_attachment_config(
+            kit,
+            att,
+            user_message=user_message,
+            prompt=prompt,
+        )
+        if legacy_cfg is not None:
+            try:
+                return await kit.achat(prompt=prompt, config=legacy_cfg)
+            except TypeError:
+                pass
+        return await kit.achat(prompt=prompt)
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +234,12 @@ def _analyze_single_frame_sync(frame: FrameEntry, kit: Any) -> tuple[str, dict]:
         output_format="Structured plain text with labelled sections",
     )
 
-    config = _build_attachment_config(kit, [rf])
-    response = kit.chat(prompt=prompt, config=config)
+    response = _chat_with_prompt_sync(
+        kit,
+        prompt=prompt,
+        user_message="Analyze the attached video frame.",
+        attachments=[rf],
+    )
     text = response.content or ""
     usage = response.usage or {}
     return text, usage
@@ -189,8 +277,12 @@ def _analyze_grid_sync(
         output_format="Structured plain text, one section per frame",
     )
 
-    config = _build_attachment_config(kit, [rf])
-    response = kit.chat(prompt=prompt, config=config)
+    response = _chat_with_prompt_sync(
+        kit,
+        prompt=prompt,
+        user_message=f"Analyze this grid of {n} chronological frames.",
+        attachments=[rf],
+    )
     return response.content or "", response.usage or {}
 
 
@@ -217,8 +309,12 @@ async def _analyze_single_frame_async(frame: FrameEntry, kit: Any) -> tuple[str,
         output_format="Structured plain text with labelled sections",
     )
 
-    config = _build_attachment_config(kit, [rf])
-    response = await kit.achat(prompt=prompt, config=config)
+    response = await _chat_with_prompt_async(
+        kit,
+        prompt=prompt,
+        user_message="Analyze the attached video frame.",
+        attachments=[rf],
+    )
     return response.content or "", response.usage or {}
 
 
@@ -298,33 +394,39 @@ async def analyze_frames_async(
     grid_size: int,
     usage: VideoProcessorUsage,
 ) -> list[FrameEntry]:
-    """Async variant -- uses asyncio.gather for concurrent LLM calls."""
+    """Async variant — Semaphore-based concurrency: all tasks submitted at once,
+    capped to *max_workers* in-flight.  Eliminates the head-of-line blocking of
+    the old batch-by-batch approach so a slow frame never delays fast ones.
+    """
     kept = [f for f in frames if f.kept and f.image_data]
     if not kept:
         return frames
 
     results: dict[int, str] = {}
+    sem = asyncio.Semaphore(max_workers)
 
     if mode == FrameAnalysisMode.INDIVIDUAL:
-        batches = [kept[i : i + batch_size] for i in range(0, len(kept), batch_size)]
-        for batch in batches:
-            tasks = [_analyze_single_frame_async(f, kit) for f in batch]
-            outputs = await asyncio.gather(*tasks, return_exceptions=False)
-            for frm, (text, usg) in zip(batch, outputs, strict=False):
-                results[frm.frame_id] = text
-                usage.analysis_input_tokens += usg.get("prompt_tokens", 0)
-                usage.analysis_output_tokens += usg.get("completion_tokens", 0)
+        async def _bounded_single(frame: FrameEntry) -> tuple[int, str, dict]:  # noqa: ANN401
+            async with sem:
+                text, usg = await _analyze_single_frame_async(frame, kit)
+                return frame.frame_id, text, usg
+
+        outputs = await asyncio.gather(*[_bounded_single(f) for f in kept])
+        for fid, text, usg in outputs:
+            results[fid] = text
+            usage.analysis_input_tokens += usg.get("prompt_tokens", 0)
+            usage.analysis_output_tokens += usg.get("completion_tokens", 0)
     else:
-        # GRID: run in thread pool (sync PIL stitching + sync kit call)
-        loop = asyncio.get_event_loop()
+        # GRID: CPU-bound PIL stitching + sync kit call — run in thread via to_thread
         grid_batches = [kept[i : i + grid_size] for i in range(0, len(kept), grid_size)]
-        with ThreadPoolExecutor(max_workers=min(max_workers, len(grid_batches))) as pool:
-            futures = [
-                loop.run_in_executor(pool, _analyze_grid_sync, gb, kit, 2)
-                for gb in grid_batches
-            ]
-            outputs = await asyncio.gather(*futures)
-        for gb, (text, usg) in zip(grid_batches, outputs, strict=False):
+
+        async def _bounded_grid(gb: list[FrameEntry]) -> tuple[list[FrameEntry], str, dict]:  # noqa: ANN401
+            async with sem:
+                text, usg = await asyncio.to_thread(_analyze_grid_sync, gb, kit, 2)
+                return gb, text, usg
+
+        grid_outputs = await asyncio.gather(*[_bounded_grid(gb) for gb in grid_batches])
+        for gb, text, usg in grid_outputs:
             usage.analysis_input_tokens += usg.get("prompt_tokens", 0)
             usage.analysis_output_tokens += usg.get("completion_tokens", 0)
             for frm in gb:

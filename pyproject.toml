@@ -429,8 +429,10 @@ known-first-party = ["ractogateway"]
 "src/ractogateway/pipelines/video_processor/pipeline.py" = [
     "B905",
     "E501",
+    "PLR0911",
     "PLR0912",
     "PLR0915",
+    "PLR2004",
     "RUF100",
 ]
 "src/ractogateway/pipelines/video_processor/_extractor.py" = [
@@ -451,6 +453,7 @@ known-first-party = ["ractogateway"]
     "PLR0912",
     "RUF100",
     "S110",
+    "S112",
 ]
 "src/ractogateway/pipelines/video_processor/_summarizer.py" = ["E501", "RUF100"]
 "src/ractogateway/pipelines/video_processor/_rag.py" = ["E501", "S110"]

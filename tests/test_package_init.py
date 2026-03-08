@@ -18,15 +18,24 @@ def _source_version() -> str:
 
 
 def test_package_import_is_lazy() -> None:
-    for module_name in list(sys.modules):
-        if module_name == "ractogateway" or module_name.startswith("ractogateway."):
-            sys.modules.pop(module_name, None)
+    # Save all ractogateway modules so we can restore them after this test.
+    # Without restoring, Pydantic model identity breaks for subsequent tests
+    # (two copies of the same class exist in different import cycles).
+    saved = {k: v for k, v in sys.modules.items()
+             if k == "ractogateway" or k.startswith("ractogateway.")}
 
-    module = importlib.import_module("ractogateway")
+    for module_name in list(saved):
+        sys.modules.pop(module_name, None)
 
-    assert module.__version__ == _source_version()
-    assert "ractogateway.rag" not in sys.modules
-    assert "ractogateway.openai_developer_kit" not in sys.modules
+    try:
+        module = importlib.import_module("ractogateway")
+
+        assert module.__version__ == _source_version()
+        assert "ractogateway.rag" not in sys.modules
+        assert "ractogateway.openai_developer_kit" not in sys.modules
+    finally:
+        # Restore original modules so later tests use consistent class identities
+        sys.modules.update(saved)
 
 
 def test_dir_exposes_public_api() -> None:

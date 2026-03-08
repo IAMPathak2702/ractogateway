@@ -10,6 +10,31 @@ from typing import Any
 
 from ._models import TranscriptSegment, VideoProcessorUsage, VideoSection
 
+
+def _chat_with_prompt_sync(kit: Any, *, prompt: Any, user_message: str) -> Any:  # noqa: ANN401
+    """Call ``kit.chat`` with modern ChatConfig, with legacy fallback."""
+    from ractogateway._models.chat import ChatConfig  # noqa: PLC0415
+
+    try:
+        return kit.chat(ChatConfig(user_message=user_message, prompt=prompt))
+    except TypeError:
+        return kit.chat(prompt=prompt)
+
+
+async def _chat_with_prompt_async(
+    kit: Any,
+    *,
+    prompt: Any,
+    user_message: str,
+) -> Any:  # noqa: ANN401
+    """Call ``kit.achat`` with modern ChatConfig, with legacy fallback."""
+    from ractogateway._models.chat import ChatConfig  # noqa: PLC0415
+
+    try:
+        return await kit.achat(ChatConfig(user_message=user_message, prompt=prompt))
+    except TypeError:
+        return await kit.achat(prompt=prompt)
+
 # ---------------------------------------------------------------------------
 # Summary prompt
 # ---------------------------------------------------------------------------
@@ -99,7 +124,11 @@ def generate_summary_sync(
         context=context,
     )
 
-    response = kit.chat(prompt=prompt)
+    response = _chat_with_prompt_sync(
+        kit,
+        prompt=prompt,
+        user_message="Generate a comprehensive summary from the provided timeline context.",
+    )
     usage.summary_input_tokens += (response.usage or {}).get("prompt_tokens", 0)
     usage.summary_output_tokens += (response.usage or {}).get("completion_tokens", 0)
     return response.content or "(Summary generation returned no content.)"
@@ -132,7 +161,11 @@ async def generate_summary_async(
         context=context,
     )
 
-    response = await kit.achat(prompt=prompt)
+    response = await _chat_with_prompt_async(
+        kit,
+        prompt=prompt,
+        user_message="Generate a comprehensive summary from the provided timeline context.",
+    )
     usage.summary_input_tokens += (response.usage or {}).get("prompt_tokens", 0)
     usage.summary_output_tokens += (response.usage or {}).get("completion_tokens", 0)
     return response.content or "(Summary generation returned no content.)"

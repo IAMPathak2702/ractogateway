@@ -87,6 +87,9 @@ VideoProcessorPipeline(
 | `transcribe_audio` | `bool` | `True` | Extract and transcribe the audio track |
 | `analyze_frames` | `bool` | `True` | Pass kept frames to the vision LLM |
 | `generate_summary` | `bool` | `True` | Generate a comprehensive Markdown summary |
+| `processing_mode` | `VideoProcessingMode` | `ACTIVE` | `ACTIVE` = full video; `PASSIVE` = focused time window |
+| `focus_time_seconds` | `float \| None` | `None` | Center timestamp for passive mode (seconds or parseable string) |
+| `window_seconds` | `float` | `5.0` | Passive-mode half-window: processes `focus ± window` seconds |
 | `rag_pipeline` | `Any \| None` | `None` | `RactoRAG` instance for optional storage |
 | `safe_mode` | `bool` | `False` | Catch all exceptions; return them in `result.error` |
 | `tracer` | `Any \| None` | `None` | `RactoTracer` for OTEL tracing |
@@ -115,6 +118,9 @@ def run(
     transcribe_audio=None,
     language=None,
     generate_summary=None,
+    processing_mode=None,
+    focus_time_seconds=None,
+    window_seconds=None,
     store_in_rag=False,
     user_id=None,
 ) -> VideoProcessorResult
@@ -142,6 +148,56 @@ async def arun(source, **kwargs) -> VideoProcessorResult
 
 Async variant of `run()`. CPU-bound steps run in a `ThreadPoolExecutor`;
 LLM calls use `asyncio.gather` for concurrency.
+
+#### answer_question
+
+```python
+def answer_question(
+    source: str | Path | bytes | list,
+    *,
+    question: str,
+    processing_mode: VideoProcessingMode | str = VideoProcessingMode.ACTIVE,
+    focus_time: float | int | str | None = None,
+    window_seconds: float = 5.0,
+    max_context_chars: int = 40_000,
+    **run_kwargs,
+) -> VideoProcessorResult
+```
+
+Process a video then answer a user question from the extracted timeline
+context. Combines passive-mode windowed processing with a QA LLM call.
+The `answer` and `question` fields are populated on the returned result.
+
+`focus_time` accepts all formats supported by `parse_timestamp`
+(`130`, `"02:10"`, `"2 mins 10 sec"`).
+
+#### aanswer_question
+
+```python
+async def aanswer_question(source, *, question, ...) -> VideoProcessorResult
+```
+
+Async variant of `answer_question`.
+
+#### parse_timestamp
+
+```python
+@staticmethod
+def parse_timestamp(value: float | int | str) -> float
+```
+
+Parse a human-readable timestamp into seconds. Accepted formats:
+
+| Input | Parsed as |
+| ----- | --------- |
+| `130` / `130.0` | `130.0` seconds |
+| `"02:10"` | `130.0` seconds (MM:SS) |
+| `"1:02:10"` | `3730.0` seconds (HH:MM:SS) |
+| `"2 mins 10 sec"` | `130.0` seconds |
+| `"1h 3m"` | `3780.0` seconds |
+| `"90s"` | `90.0` seconds |
+
+Raises `ValueError` for negative values or unrecognised formats.
 
 ---
 
@@ -187,6 +243,11 @@ Full output of a pipeline run.
 | `rag_chunk_count` | `int` | Number of chunks stored |
 | `usage` | `VideoProcessorUsage` | Token and frame accounting |
 | `error` | `str \| None` | Error message when `safe_mode=True` |
+| `processing_mode` | `VideoProcessingMode` | Whether this run used `ACTIVE` or `PASSIVE` mode |
+| `window_start_seconds` | `float \| None` | Passive-mode window start in source-video seconds |
+| `window_end_seconds` | `float \| None` | Passive-mode window end in source-video seconds |
+| `question` | `str \| None` | User question (set by `answer_question`) |
+| `answer` | `str \| None` | LLM answer to `question` (set by `answer_question`) |
 
 **Methods**
 
@@ -314,6 +375,19 @@ class TranscriberBackend(str, Enum)
 | `groq-api` | `"whisper-large-v3"` `"whisper-large-v3-turbo"` `"distil-whisper-large-v3-en"` |
 | `deepgram-api` | `"nova-3"` `"nova-2"` `"enhanced"` `"base"` |
 | `ollama` | Model name on your Ollama server, e.g. `"whisper"` |
+
+---
+
+### VideoProcessingMode
+
+```python
+class VideoProcessingMode(str, Enum)
+```
+
+| Value       | Behaviour                                                        |
+| ----------- | ---------------------------------------------------------------- |
+| `"active"`  | Process the full video (default)                                 |
+| `"passive"` | Process only a focused time window (`focus ± window_seconds`)    |
 
 ---
 

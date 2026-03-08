@@ -27,6 +27,13 @@ class FrameAnalysisMode(str, Enum):
     GRID = "grid"  # stitch N frames into a collage → one API call
 
 
+class VideoProcessingMode(str, Enum):
+    """How much of the video should be processed."""
+
+    ACTIVE = "active"  # process the full video
+    PASSIVE = "passive"  # process only a focused time window
+
+
 class TranscriberBackend(str, Enum):
     """Audio transcription backend."""
 
@@ -136,6 +143,15 @@ class VideoConfig(BaseModel):
 
     store_in_rag: bool = False
     """Push all extracted content into the supplied rag_pipeline for Q&A."""
+
+    processing_mode: VideoProcessingMode = VideoProcessingMode.ACTIVE
+    """`active` processes full video; `passive` processes only a time window."""
+
+    focus_time_seconds: float | None = None
+    """Center timestamp in seconds for passive mode (e.g. 130 for 02:10)."""
+
+    window_seconds: float = 5.0
+    """Passive-mode half-window size in seconds (focus ± window_seconds)."""
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +297,21 @@ class VideoProcessorResult(BaseModel):
 
     stage_errors: list[StageError] = Field(default_factory=list)
     """All per-stage errors collected during the run (fatal + non-fatal)."""
+
+    processing_mode: VideoProcessingMode = VideoProcessingMode.ACTIVE
+    """Whether this run processed full video (`active`) or a window (`passive`)."""
+
+    window_start_seconds: float | None = None
+    """Passive-mode window start timestamp in source-video seconds."""
+
+    window_end_seconds: float | None = None
+    """Passive-mode window end timestamp in source-video seconds."""
+
+    question: str | None = None
+    """Optional user question answered from this run."""
+
+    answer: str | None = None
+    """Answer generated for `question`, when question-answer mode is used."""
 
     # ── Convenience properties ────────────────────────────────────────────
 
