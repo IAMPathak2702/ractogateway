@@ -37,13 +37,16 @@ Quick start::
 from __future__ import annotations
 
 import asyncio
+import collections
 import hashlib
+import io
 import json
+import logging
 import re
 import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias, cast
 
 from ractogateway._models.chat import ChatConfig
 from ractogateway.prompts.engine import RactoPrompt
@@ -91,6 +94,10 @@ _DEFAULT_PAGE_RAG_PROMPT = RactoPrompt(
 
 # Regex for detecting Markdown-style headings on a page
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)", re.MULTILINE)
+_OCR_PAGE_RECORD_LENGTH = 4
+TextPageRecord: TypeAlias = tuple[int | None, str]
+OcrPageRecord: TypeAlias = tuple[int, str, bool, float | None]
+PageRecord: TypeAlias = TextPageRecord | OcrPageRecord
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +107,7 @@ _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)", re.MULTILINE)
 
 def _split_into_windows(
     text: str, page_size: int, page_overlap: int
-) -> list[tuple[int | None, str]]:
+) -> list[TextPageRecord]:
     """Split *text* into fixed-size windows. Returns (page_number, content)."""
     windows: list[tuple[int | None, str]] = []
     start = 0
@@ -113,6 +120,13 @@ def _split_into_windows(
         if end == len(text):
             break
     return windows
+
+
+def _normalise_page_record(page_record: PageRecord) -> tuple[int | None, str, bool, float | None]:
+    if len(page_record) == _OCR_PAGE_RECORD_LENGTH:
+        return cast("OcrPageRecord", page_record)
+    page_num, raw_text = cast("TextPageRecord", page_record)
+    return page_num, raw_text, False, None
 
 
 def _detect_section_title(text: str) -> str | None:
@@ -240,15 +254,16 @@ class PageIndexRAG:
         self, image_bytes: bytes, mime_type: str = "image/png"
     ) -> tuple[str, float | None]:
         """Run OCR on a single page image. Returns (text, confidence|None)."""
-        assert self._ocr_backend is not None  # noqa: S101
         backend = self._ocr_backend
+        if backend is None:
+            raise RuntimeError("OCR backend is required to process rendered PDF pages.")
         # TesseractOcrBackend exposes confidence natively
         if hasattr(backend, "extract_with_confidence"):
             text, conf = backend.extract_with_confidence(image_bytes)
             return text, conf
         return backend.extract_text(image_bytes, mime_type), None
 
-    def _pages_from_pdf(self, path: str) -> list[tuple[int, str, bool, float | None]]:
+    def _pages_from_pdf(self, path: str) -> list[OcrPageRecord]:
         """Extract text page-by-page from a PDF.
 
         Returns list of ``(page_number, text, ocr_applied, ocr_confidence)``.
@@ -269,34 +284,29 @@ class PageIndexRAG:
                         path, first_page=i, last_page=i, fmt="png"
                     )
                     if images:
-                        import io  # noqa: PLC0415
-
                         buf = io.BytesIO()
                         images[0].save(buf, format="PNG")
                         ocr_text, conf = self._ocr_page_image(buf.getvalue())
-                        if ocr_text.strip():
-                            if conf is None or conf >= self._min_ocr_confidence:
-                                pages.append((i, ocr_text, True, conf))
+                        if ocr_text.strip() and (
+                            conf is None or conf >= self._min_ocr_confidence
+                        ):
+                            pages.append((i, ocr_text, True, conf))
         return pages
 
-    def _pages_from_doc(self, doc: Document) -> list[tuple[int | None, str]]:
+    def _pages_from_doc(self, doc: Document) -> list[TextPageRecord]:
         """Produce (page_number, text) tuples from an arbitrary document."""
         return _split_into_windows(doc.content, self._page_size, self._page_overlap)
 
     def _build_entries(
         self,
-        raw_pages: list[tuple[int | None, str]] | list[tuple[int, str, bool, float | None]],
+        raw_pages: Sequence[PageRecord],
         source: str,
         doc_id: str,
         extra: dict[str, Any],
     ) -> list[PageEntry]:
         entries: list[PageEntry] = []
         for item in raw_pages:
-            if len(item) == 4:  # type: ignore[arg-type]
-                page_num, raw_text, ocr_applied, ocr_conf = item  # type: ignore[misc]
-            else:
-                page_num, raw_text = item[0], item[1]  # type: ignore[misc]
-                ocr_applied, ocr_conf = False, None
+            page_num, raw_text, ocr_applied, ocr_conf = _normalise_page_record(item)
             processed = self._apply_processors(raw_text)
             if not processed:
                 continue
@@ -361,10 +371,10 @@ class PageIndexRAG:
         from ractogateway.rag.page_index._bm25 import _tokenise
 
         query_terms = _tokenise(query)
-        candidates = self._decision.candidates(query_terms)
+        candidates: set[str] | None = self._decision.candidates(query_terms)
         if not candidates:
             # Full-scan fallback when no terms match the decision index
-            candidates = None  # type: ignore[assignment]
+            candidates = None
         scored = self._bm25.score(query, candidates)
         results: list[PageIndexResult] = []
         for rank, (eid, score, matched) in enumerate(scored[:top_k], start=1):
@@ -399,7 +409,7 @@ class PageIndexRAG:
         self._doc_ids.add(doc_id)
         self._file_hashes[file_hash] = doc_id
         raw_pages = self._pages_from_pdf(path)
-        entries = self._build_entries(raw_pages, path, doc_id, extra)  # type: ignore[arg-type]
+        entries = self._build_entries(raw_pages, path, doc_id, extra)
         self._index_entries(entries)
         return entries
 
@@ -509,8 +519,6 @@ class PageIndexRAG:
         **metadata:
             Forwarded to every :meth:`ingest` call.
         """
-        import logging  # noqa: PLC0415
-
         root = Path(directory)
         files = [p for p in root.glob(pattern) if p.is_file()]
         total = len(files)
@@ -551,8 +559,6 @@ class PageIndexRAG:
         **metadata:
             Forwarded to every :meth:`aingest` call.
         """
-        import logging  # noqa: PLC0415
-
         root = Path(directory)
         files = [p for p in root.glob(pattern) if p.is_file()]
         total = len(files)
@@ -774,8 +780,6 @@ class PageIndexRAG:
         path:
             Destination file path (will be created or overwritten).
         """
-        import collections  # noqa: PLC0415
-
         data: dict[str, Any] = {
             "version": 1,
             "entries": [e.model_dump() for e in self._entries.values()],
@@ -795,7 +799,7 @@ class PageIndexRAG:
         Path(path).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: str, **kwargs: Any) -> "PageIndexRAG":
+    def load(cls, path: str, **kwargs: Any) -> PageIndexRAG:
         """Load a previously saved index from *path*.
 
         Parameters
@@ -810,8 +814,6 @@ class PageIndexRAG:
         PageIndexRAG
             A new instance with the index fully restored.
         """
-        import collections  # noqa: PLC0415
-
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         instance = cls(**kwargs)
 

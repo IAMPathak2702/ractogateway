@@ -41,6 +41,7 @@ RactoGateway is a unified AI SDK that gives you a single, clean interface to Ope
   - [SQLAnalystPipeline](#sqlanalystpipeline)
   - [ListClassifierPipeline](#listclassifierpipeline)
   - [VideoProcessorPipeline](#videoprocessorpipeline)
+  - [RactoMailKit](#ractomailkit)
   - [AgentPipeline](#agentpipeline)
 - [Performance & Cost Optimization](#performance--cost-optimization)
   - [Exact-Match Cache](#exact-match-cache)
@@ -80,6 +81,7 @@ RactoGateway solves this by providing:
 - **RAG pipeline** — ingest files, embed, store, retrieve, and generate answers with one class
 - **PageIndexRAG** — vectorless, page-level BM25 RAG; no embedding API, no vector store — pure Python decision-tree + Okapi BM25 retrieval
 - **Four prebuilt pipelines** — SQL analytics, list classification, agentic tool loops, and video intelligence workflows with sync/async APIs
+- **RactoMailKit** — grounded email intelligence with references, saved searches, memory, and V8 DAG helpers
 - **Low-level Gateway** — wraps any adapter for direct prompt execution without `ChatConfig`
 - **Exact-match cache** — SHA-256 LRU cache eliminates duplicate API calls with zero latency
 - **Semantic cache** — cosine-similarity cache returns cached answers for semantically equivalent queries
@@ -103,6 +105,7 @@ These are the most common real-world use cases and the built-in modules used for
 | Add tool calling to business workflows | Provider-specific function-calling payloads and parsing | Register Python functions once with `ToolRegistry`; execute tool calls through a unified interface |
 | Add streaming UX in web/mobile apps | Different stream event formats per provider | Consume typed `StreamChunk` objects (`delta`, `accumulated_text`, `is_final`, `usage`) |
 | Build retrieval-augmented assistants (RAG) | Integrating readers, chunkers, embedders, stores, and retrieval prompts | `RactoRAG` handles ingest -> embed -> store -> retrieve -> generate with pluggable components |
+| Search and reason over mailbox history | Email threads are fragmented, noisy, and hard to cite | `RactoMailKit` adds grounded search, saved searches, memory, and typed references |
 | Analyze PDFs/images alongside text prompts | Multimodal payload formats vary by provider | `RactoFile` + `to_messages(provider=...)` translates content blocks automatically |
 | Keep costs predictable at scale | Duplicate requests, overpowered model usage, token overruns | Exact cache, semantic cache, cost-aware routing (`model="auto"`), and token truncation |
 | Run resilient background AI jobs | Long-running tasks fail in request threads | `RactoCeleryWorker` supports retries, async ingestion, and parallel fan-out |
@@ -136,6 +139,7 @@ RactoGateway is designed as one composable stack rather than disconnected helper
 | Tool runtime | `ToolRegistry`, `tool`, runtime adapters | Register Python callables once and execute tool calls through a normalized interface |
 | Output safety | `response_model`, strict validation | Parse and validate model output into typed Pydantic objects |
 | Retrieval | `RactoRAG`, `PageIndexRAG`, readers/chunkers/embedders/stores | Document ingestion, indexing, retrieval, and grounded answer generation |
+| Mail intelligence | `ractogateway.mail` | Multi-connector email sync, grounded search, citations, memory, and V8 DAG helpers |
 | Turn-key workflows | `pipelines` package | SQL analyst, list classifier, video processor, and ReAct-style agent pipelines |
 | Cost + throughput | `cache`, `routing`, `truncation`, `batch` | Cache hits, auto model routing, context trimming, and bulk provider jobs |
 | Ops + scale | `redis`, `celery`, `kafka`, `mcp`, `telemetry` | Distributed cache/memory/rate limits, background workers, event transport, MCP interoperability, observability |
@@ -149,7 +153,7 @@ A typical production flow with RactoGateway looks like this:
 3. Execute request with typed config (`ChatConfig`, `EmbeddingConfig`) and optional streaming.
 4. Run tools when needed through `ToolRegistry` (uniform across providers).
 5. Ground answers with retrieval (`RactoRAG` or `PageIndexRAG`) when your use case depends on private docs.
-6. Promote common business tasks to a prebuilt pipeline (`SQLAnalystPipeline`, `ListClassifierPipeline`, `VideoProcessorPipeline`, `AgentPipeline`).
+6. Promote common business tasks to a prebuilt workflow (`SQLAnalystPipeline`, `ListClassifierPipeline`, `VideoProcessorPipeline`, `RactoMailKit`, `AgentPipeline`).
 7. Add cost and reliability controls (`ExactMatchCache`, `SemanticCache`, `CostAwareRouter`, `TokenTruncator`, batch APIs).
 8. Scale safely with Redis infrastructure, Celery workers, Kafka streams, and MCP-compatible tool ecosystems.
 
@@ -2527,6 +2531,7 @@ and structured outputs behind simple `run()` / `arun()` entry points.
 | SQL Analyst | `SQLAnalystPipeline`, `AsyncSQLAnalystPipeline` | NL -> SQL -> execution -> analysis -> answer (+ optional chart) | BI copilots, analytics assistants, data ops |
 | List Classifier | `ListClassifierPipeline`, `AsyncListClassifierPipeline` | NL text -> best option(s) from `list[str]` with confidence | Ticket routing, intent detection, queue triage |
 | Video Processor | `VideoProcessorPipeline`, `AsyncVideoProcessorPipeline` | Video -> frames + transcription + vision analysis + summary (+ optional RAG writeback) | Lecture indexing, training QA, media intelligence |
+| Mail Intelligence | `RactoMailKit` | Email sync -> grounded search -> references -> saved searches -> DAG helpers | Mailbox intelligence, vendor follow-up, audit search |
 | Agent | `AgentPipeline`, `AsyncAgentPipeline` | ReAct loop: reason -> call tool -> observe -> repeat until finish | Tool-using assistants, research automation, multi-step workflows |
 
 ### SQLAnalystPipeline
@@ -2629,9 +2634,49 @@ print(result.final_answer)
 print(result.stop_reason)
 ```
 
+### RactoMailKit
+
+`RactoMailKit` brings grounded email intelligence into the same repo:
+
+1. Sync normalized mail connectors
+2. Run grounded search and `ask()` with `EmailRef` citations
+3. Save and replay searches
+4. Use multi-turn conversation memory
+5. Orchestrate mail tasks with the lightweight V8-style `RactoDAG`
+
+```python
+from datetime import UTC, datetime
+
+from ractogateway.mail import (
+    MailAddress,
+    MailMessage,
+    MockMailConnector,
+    RactoMailKit,
+)
+
+messages = [
+    MailMessage(
+        message_id="m-1",
+        thread_id="t-1",
+        connector_id="mock",
+        subject="Invoice dispute INV-2024-447",
+        sender=MailAddress(email="mehta@example.com", name="Mehta"),
+        sent_at=datetime(2024, 2, 20, 10, 0, tzinfo=UTC),
+        body_text="GST dispute raised on invoice INV-2024-447 for Rs. 118,200.",
+    )
+]
+
+mail = RactoMailKit(connectors=[MockMailConnector(messages=messages)])
+mail.sync()
+response = mail.ask("What invoice disputes do we have?")
+print(response.answer)
+print(response.references[0].subject)
+```
+
 For full usage patterns, configuration options, and async examples:
 
 - [Pipelines guide](docs/guide/pipelines.md)
+- [RactoMail guide](docs/guide/mail.md)
 - [SQL Analyst pipeline guide](docs/guide/pipelines/sql_analyst.md)
 - [List Classifier pipeline guide](docs/guide/pipelines/list_classifier.md)
 - [Video Processor pipeline guide](docs/guide/pipelines/video_processor.md)

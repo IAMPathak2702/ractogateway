@@ -34,6 +34,7 @@ keywords = [
     "pydantic",
     "sdk",
     "gateway",
+    "email-intelligence",
     "unified-api",
     "developer-kit",
     "rag",
@@ -97,6 +98,10 @@ anthropic = ["anthropic>=0.40,<1.0"]
 # Local / self-hosted model inference
 ollama = ["ollama>=0.3,<1.0"]
 huggingface = ["huggingface_hub>=0.23,<2.0"]
+# Privacy-first local LLM — runs on your laptop, zero data egress
+local-llamacpp = ["llama-cpp-python>=0.2,<1.0", "huggingface_hub>=0.23,<2.0"]
+local-llamacpp-gpu = ["llama-cpp-python>=0.2,<1.0", "huggingface_hub>=0.23,<2.0"]
+local = ["ractogateway[ollama]", "ractogateway[local-llamacpp]"]
 all = [
     "ractogateway[openai]",
     "ractogateway[google]",
@@ -216,6 +221,7 @@ observability = [
 # Real-world end-to-end LLM pipeline patterns.
 # Each extra pulls in only the dependencies needed for that pipeline.
 #
+# pip install ractogateway[mail]                 — RactoMail foundation
 # pip install ractogateway[pipelines-sql]        — NL-to-SQL + pandas + answer
 # pip install ractogateway[pipelines-sql-viz]    — above + Plotly charts
 # pip install ractogateway[pipelines-sql-polars] — NL-to-SQL + Polars (fast, no pandas needed)
@@ -228,6 +234,7 @@ observability = [
 # pip install ractogateway[pipelines-agent]                — AgentPipeline (no extra deps)
 # pip install ractogateway[pipelines-agent-http]           — AgentPipeline + http_get tool
 # pip install ractogateway[pipelines]                      — all pipelines bundled
+mail = []
 pipelines-sql = ["sqlalchemy>=2.0,<3.0", "pandas>=2.0,<3.0"]
 pipelines-sql-viz = [
     "sqlalchemy>=2.0,<3.0",
@@ -493,6 +500,16 @@ module = [
     "anthropic.*",
     # RAG optional deps
     "pypdf.*",
+    "pdf2image",
+    "pdf2image.*",
+    "pytesseract",
+    "pytesseract.*",
+    "easyocr",
+    "easyocr.*",
+    "boto3",
+    "boto3.*",
+    "azure",
+    "azure.*",
     "docx.*",
     "openpyxl.*",
     "PIL.*",

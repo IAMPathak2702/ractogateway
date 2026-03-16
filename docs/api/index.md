@@ -24,6 +24,7 @@ routing
 truncation
 batch
 mcp
+mail
 redis
 celery
 kafka

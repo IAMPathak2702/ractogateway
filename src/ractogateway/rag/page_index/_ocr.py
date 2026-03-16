@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Any
-
+from collections.abc import Callable
+from typing import Any, cast
 
 # ---------------------------------------------------------------------------
 # Base
@@ -85,8 +85,16 @@ def _require_pillow() -> Any:
 def _bytes_to_pil(image_bytes: bytes) -> Any:
     import io
 
-    Image = _require_pillow()
-    return Image.open(io.BytesIO(image_bytes))
+    image_module = _require_pillow()
+    return image_module.open(io.BytesIO(image_bytes))
+
+
+def _load_service_account_credentials(service_account: Any, path: str) -> Any:
+    credentials_factory = cast(
+        "Callable[[str], Any]",
+        service_account.Credentials.from_service_account_file,
+    )
+    return credentials_factory(path)
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +118,7 @@ class TesseractOcrBackend(BaseOcrBackend):
     config:
         Extra Tesseract config flags, e.g. ``"--psm 6"``.
     confidence_threshold:
-        Pages where the mean word confidence is below this value (0–100)
+        Pages where the mean word confidence is below this value (0-100)
         are flagged in the returned metadata; text is still returned.
         Set to ``0`` to disable filtering.
     """
@@ -134,7 +142,9 @@ class TesseractOcrBackend(BaseOcrBackend):
                 "Install it with:  pip install ractogateway[rag-ocr-tesseract]"
             ) from exc
         img = _bytes_to_pil(image_bytes)
-        return pytesseract.image_to_string(img, lang=self._lang, config=self._config)
+        return str(
+            pytesseract.image_to_string(img, lang=self._lang, config=self._config)
+        )
 
     def extract_with_confidence(self, image_bytes: bytes) -> tuple[str, float]:
         """Return ``(text, mean_confidence)`` for confidence-aware ingestion."""
@@ -145,7 +155,6 @@ class TesseractOcrBackend(BaseOcrBackend):
                 "pytesseract is required for TesseractOcrBackend. "
                 "Install it with:  pip install ractogateway[rag-ocr-tesseract]"
             ) from exc
-        import pandas as pd  # noqa: PLC0415 — lazy
 
         img = _bytes_to_pil(image_bytes)
         data = pytesseract.image_to_data(
@@ -237,8 +246,9 @@ class GoogleVisionBackend(BaseOcrBackend):
                     "Install it with:  pip install ractogateway[rag-ocr-google]"
                 ) from exc
             if self._credentials_path:
-                creds = service_account.Credentials.from_service_account_file(
-                    self._credentials_path
+                creds = _load_service_account_credentials(
+                    service_account,
+                    self._credentials_path,
                 )
                 self._client = vision.ImageAnnotatorClient(credentials=creds)
             else:
@@ -314,8 +324,9 @@ class GoogleDocumentAIBackend(BaseOcrBackend):
                 api_endpoint=f"{self._location}-documentai.googleapis.com"
             )
             if self._credentials_path:
-                creds = service_account.Credentials.from_service_account_file(
-                    self._credentials_path
+                creds = _load_service_account_credentials(
+                    service_account,
+                    self._credentials_path,
                 )
                 self._client = documentai.DocumentProcessorServiceClient(
                     client_options=opts, credentials=creds

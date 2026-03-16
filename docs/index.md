@@ -22,6 +22,7 @@ RactoGateway solves this by providing:
 - Typed streaming chunks and async support across providers.
 - End-to-end retrieval with `RactoRAG` plus vectorless `PageIndexRAG`.
 - Turn-key workflows: `SQLAnalystPipeline`, `ListClassifierPipeline`, `VideoProcessorPipeline`, `AgentPipeline`.
+- Email intelligence with `RactoMailKit` for grounded mailbox search, memory, and DAG orchestration.
 - Production controls: exact cache, semantic cache, routing, truncation, batch.
 - Ops modules for Redis, Celery, Kafka, MCP, and telemetry.
 
@@ -33,6 +34,7 @@ RactoGateway solves this by providing:
 | Return strict JSON for automation | Markdown fenced JSON and schema drift | `RactoPrompt(output_format=YourModel)` embeds schema and enforces shape |
 | Add tools into workflows | Different function-calling formats per vendor | Register Python tools once with `ToolRegistry` |
 | Build RAG assistants | Stitching readers/chunkers/embedders/stores manually | `RactoRAG` handles ingest -> retrieve -> generate |
+| Search and reason over email | Mailboxes are fragmented and hard to query reliably | `RactoMailKit` adds grounded search, citations, saved searches, and workflow primitives |
 | Keep costs predictable | Duplicate calls and oversized model usage | Cache + routing + truncation + batch controls |
 | Operate on multiple servers | In-memory cache/memory does not scale | Redis modules for distributed cache, memory, and rate limits |
 | Run long jobs safely | Request-thread failures and retries | `RactoCeleryWorker` for retries and background execution |
@@ -59,6 +61,7 @@ RactoGateway is designed as one composable stack rather than disconnected helper
 | Tool execution | `ToolRegistry`, `tool` decorator | Define Python tools once and execute them through a provider-agnostic interface |
 | Structured response safety | `response_model` support + strict validation | Typed results instead of brittle raw JSON parsing |
 | Retrieval pipeline | `RactoRAG`, `PageIndexRAG`, readers/chunkers/embedders/stores | Ingest -> retrieve -> generate for document-grounded answers |
+| Mail intelligence | `ractogateway.mail` | Multi-connector sync, grounded email search, saved searches, V7/V8 helpers |
 | Turn-key workflows | `SQLAnalystPipeline`, `ListClassifierPipeline`, `VideoProcessorPipeline`, `AgentPipeline` | Complete domain workflows with sync and async variants |
 | Cost and performance controls | exact cache, semantic cache, routing, truncation, batch | Lower spend, lower latency, and better throughput |
 | Production operations | Redis, Celery, Kafka, MCP, telemetry | Distributed memory/cache/rate-limits, background jobs, streaming, and observability |
@@ -83,6 +86,7 @@ Use the library as a composable delivery pipeline instead of isolated API calls:
 | `SQLAnalystPipeline` | Natural language question + DB connection | SQL, result tables, narrative answer, optional chart | BI copilots, operations reporting, analytics assistants |
 | `ListClassifierPipeline` | User text + controlled options list | Single/multi label, confidence, optional reasoning | Ticket routing, intent detection, workflow triage |
 | `VideoProcessorPipeline` | Video path/URL/YouTube/bytes | Transcript, frame analysis, section summaries, optional RAG storage | Lecture indexing, training content QA, media intelligence |
+| `RactoMailKit` | Normalized email connectors | Grounded answers, references, saved searches, and V8 DAG support | Mailbox intelligence, vendor follow-up, audit search |
 | `AgentPipeline` | Goal + tools | Multi-step tool traces + final answer | ReAct-style automation, tool-driven agents, research workflows |
 
 ## Real-World Use Cases (Implementation Blueprints)
@@ -96,6 +100,7 @@ not just a chat wrapper.
 | BI and data analyst assistant | `SQLAnalystPipeline`, `RactoPrompt`, typed models | Natural language to SQL, safe query execution, markdown answer, optional charts |
 | Internal knowledge assistant | `RactoRAG` or `PageIndexRAG`, `RactoPrompt` | Policy and SOP answers grounded on private docs with source-aware retrieval |
 | Video intelligence pipeline | `VideoProcessorPipeline`, optional RAG store | Transcript + frame analysis + summary, then searchable knowledge base from videos |
+| Email intelligence workflow | `RactoMailKit`, `MockMailConnector`, `RactoDAG` | Grounded email Q&A, multi-mailbox search, saved searches, and typed DAG runs |
 | Agentic back-office automation | `AgentPipeline`, `ToolRegistry`, `MCP`, Celery | Multi-step tool execution with bounded steps, retries, and background orchestration |
 
 ### 1) Customer Support Copilot (SaaS)
@@ -294,7 +299,7 @@ Result: one codebase, provider flexibility, and predictable cost envelopes as us
 
 - New to the library: start with [Installation](installation.md) and [Quick Start](quickstart.md).
 - Building assistants and APIs: see [Developer Kits](guide/developer_kits.md), [Prompt Engine](guide/prompt_engine.md), and [Tools](guide/tools.md).
-- Building retrieval systems: see [RAG](guide/rag.md), [Embeddings](guide/embeddings.md), and [Pipelines](guide/pipelines.md).
+- Building retrieval systems: see [RAG](guide/rag.md), [Embeddings](guide/embeddings.md), [Mail](guide/mail.md), and [Pipelines](guide/pipelines.md).
 - Running in production: see [Cache](guide/cache.md), [Routing](guide/routing.md), [Redis](guide/redis.md), [Celery](guide/celery.md), [Kafka](guide/kafka.md), and [MCP](guide/mcp.md).
 - Improving LLM discoverability: see [LLM Discovery Guide](guide/llm_discovery.md) and root files `llms.txt`, `llms-full.txt`, and `robots.txt`.
 
